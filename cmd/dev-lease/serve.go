@@ -431,6 +431,10 @@ func startListing(ctx context.Context, cli *docker.Client, st lease.Store, patte
 		return strings.Join(out, " ")
 	}
 	var listErr error
+	// One listing of every image: a project's images are its labelled
+	// ones plus the unlabelled ones the removal rule counts as its own
+	// (Compose v2 builds images without labels).
+	allImgs, allImgsErr := cli.Images(ctx, "")
 	for _, p := range docker.SortedProjects(projects) {
 		if !reaper.Managed(p, reaper.Config{Patterns: patterns, Own: own}) {
 			fmt.Fprintf(w, "not managed: %s\n", p)
@@ -439,7 +443,16 @@ func startListing(ctx context.Context, cli *docker.Client, st lease.Store, patte
 		conts, err1 := cli.Containers(ctx, p)
 		nets, err2 := cli.Networks(ctx, p)
 		vols, err3 := cli.Volumes(ctx, p)
-		imgs, err4 := cli.Images(ctx, p)
+		err4 := allImgsErr
+		var imgs []docker.Object
+		if err4 == nil {
+			services := reaper.ServicesOf(conts, leases[p].Services)
+			for _, i := range allImgs {
+				if i.Labels[docker.ProjectLabel] == p || reaper.ImageRemovable(i, p, services, nil) {
+					imgs = append(imgs, i)
+				}
+			}
+		}
 		if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
 			fmt.Fprintf(w, "%s: listing unavailable: %v\n", p, firstErr(err1, err2, err3, err4))
 			listErr = firstErr(err1, err2, err3, err4)
