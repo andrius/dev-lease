@@ -473,9 +473,9 @@ func Details(ctx context.Context, cli *docker.Client, st lease.Store, cfg reaper
 	sort.Strings(d.Networks)
 
 	// The image split follows the removal's rule (reaper.ImageScope.Step):
-	// RemovedImages is what the removal deletes, an image by id or an
-	// unlabelled built image's own tags (Compose v2 builds images without
-	// labels); KeptImages is what stays of the stack's images, a kept
+	// RemovedImages is what the removal deletes, an image with one tag by
+	// id, one with several tags by the stack's own tags (Compose v2 builds
+	// images without labels); KeptImages is what stays of the stack's images, a kept
 	// service's tags and the pulled images its containers run from
 	// included. The listing is unfiltered, so the unlabelled built images
 	// are in view; an image that is no part of the stack is in neither.

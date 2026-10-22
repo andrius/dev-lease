@@ -15,15 +15,14 @@ type Plan struct {
 	// Stop is the running non-kept containers the stop stops.
 	Stop []string
 	// Containers, Networks, Volumes and Images are what the removal
-	// removes, by name; an unlabelled image is listed by the tags the
-	// removal deletes (ImageScope.Step).
+	// removes, by name; an image with several tags is listed by the tags
+	// the removal deletes (ImageScope.Step).
 	Containers []string
 	Networks   []string
 	Volumes    []string
 	Images     []string
 	// Kept is every object that stays because of a keep label or a kept
-	// container's use, by name, and the tags of a kept service's
-	// unlabelled image. Images a container merely runs from without
+	// container's use, by name, and the tags of a kept service's images. Images a container merely runs from without
 	// being removable are not kept: they just stay, unlisted.
 	Kept []string
 }
@@ -142,10 +141,11 @@ func (sc ImageScope) Step(i docker.Object) ImageStep {
 				return ImageStep{Reason: "untagged leftover of an earlier build"}
 			}
 			return ImageStep{Reason: "no container of the project runs from it and its tags do not carry the project's service name"}
-		case len(i.RepoTags) <= 1:
-			return ImageStep{Remove: []ImageRef{{Ref: i.ID, Name: i.Name}}}
 		}
 		st := sc.ownTags(i)
+		if len(i.RepoTags) <= 1 && len(st.Kept) == 0 {
+			return ImageStep{Remove: []ImageRef{{Ref: i.ID, Name: i.Name}}}
+		}
 		switch {
 		case len(st.Kept) > 0:
 			st.Reason = "built for a kept service of the project"

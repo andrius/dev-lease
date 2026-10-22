@@ -67,3 +67,24 @@ func TestStatusOmitsAPulledImageOfAKeptContainer(t *testing.T) {
 		t.Errorf("status = %q, want images=[myapp-web:latest]", out.String())
 	}
 }
+
+// status names a labelled image with several tags by the tag the removal
+// deletes, not by whichever tag the daemon lists first.
+func TestStatusNamesASeveralTagImageByTheStacksTag(t *testing.T) {
+	st := tempStore(t)
+	t.Setenv("DEV_LEASE_STATE", st.Path)
+	writeHeader(t, st, []string{"myapp"}, 2*time.Hour)
+	srv := fakedocker.New(t)
+	labels := map[string]string{docker.ProjectLabel: "myapp", docker.ServiceLabel: "web"}
+	srv.AddContainerWithUses("c1", "myapp-web-1", labels, "sha256:img", nil, nil)
+	srv.AddLabels("image", "sha256:img", "acme/web:1", labels)
+	srv.SetImageTags("sha256:img", "acme/web:1", "myapp-web:latest")
+
+	var out, errOut bytes.Buffer
+	if code := runStatusCmd([]string{"--socket", srv.Socket}, &out, &errOut); code != 0 {
+		t.Fatalf("status = %d (out=%q err=%q)", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "images=[myapp-web:latest]") {
+		t.Errorf("status = %q, want images=[myapp-web:latest]", out.String())
+	}
+}

@@ -9,8 +9,9 @@ import (
 
 var versionPathRe = regexp.MustCompile(`^/v\d+\.\d+/`)
 
-// allowed is the single gate every request must pass: only reads of labels
-// and listings, a stop, and removes of exactly the four object kinds, with
+// allowed is the single gate every request must pass: only reads (labels,
+// listings, logs, stats, volume sizes, and an image inspect by id or tag),
+// a stop, and removes of exactly the four object kinds, with
 // exactly the query parameters dev-lease itself generates. Everything else,
 // including DELETE with force=1, is refused before any socket I/O.
 func allowed(method, path string) bool {

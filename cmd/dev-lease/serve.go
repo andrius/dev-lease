@@ -446,26 +446,29 @@ func startListing(ctx context.Context, cli *docker.Client, st lease.Store, patte
 		err4 := allImgsErr
 		var imgs []docker.Object
 		if err4 == nil {
-			// Every image carrying the project's label, and the tags of an
-			// unlabelled image the removal deletes or keeps for a kept
-			// service, one entry per tag.
+			// The stack's images by the removal's rule, under the names the
+			// plan uses: what the removal deletes, what it keeps for a kept
+			// service or container, and a project-labelled image that stays
+			// for another reason under its own name.
 			scope := reaper.NewImageScope(p, conts, leases[p].Services)
 			for _, i := range allImgs {
-				if i.Labels[docker.ProjectLabel] == p {
-					imgs = append(imgs, i)
-					continue
-				}
-				if i.Labels[docker.ProjectLabel] != "" {
+				labelled := i.Labels[docker.ProjectLabel] == p
+				if !labelled && i.Labels[docker.ProjectLabel] != "" {
 					continue
 				}
 				step := scope.Step(i)
+				if labelled && len(step.Remove) == 0 && len(step.Kept) == 0 {
+					imgs = append(imgs, i)
+					continue
+				}
 				for _, r := range step.Remove {
 					imgs = append(imgs, docker.Object{ID: i.ID, Name: r.Name})
 				}
 				for _, k := range step.Kept {
-					// Only the stack's own tags: a pulled image a kept
-					// container runs from is not the stack's.
-					if _, own := docker.TagService(p, scope.Services, k); own {
+					// An unlabelled image only by the stack's own tags: a
+					// pulled image a kept container runs from is not the
+					// stack's.
+					if _, own := docker.TagService(p, scope.Services, k); labelled || own {
 						imgs = append(imgs, docker.Object{ID: i.ID, Name: k})
 					}
 				}

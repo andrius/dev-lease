@@ -70,14 +70,14 @@ project's when a container of the project ran from it, or when it is tagged
 whole repository, so a registry image of the same name is not matched).
 Compose v2 builds images without the project label, so an unlabelled image
 counts when its name is exactly `<project>-<service>` for one of the
-project's own services, which every sweep records in the lease. Such an
-image goes by id when it has one tag. With several tags (identical builds
-share one image id across services and projects, and a name of your own
-counts too) Docker refuses a delete by id, so the stack's own tags are
-deleted one by one, each first checked to still name the listed image, and
-the image stays for whatever tags remain. Pulled images never match and are never touched.
-Deletes run without `force`, so Docker itself protects an image another
-container uses.
+project's own services, which every sweep records in the lease. Whatever its
+labels, an image goes by id when it has one tag. With several tags
+(identical builds share one image id across services and projects, and you
+may have tagged it yourself) Docker refuses a delete by id, so the stack's
+own tags are deleted one by one, each first checked to still name the listed
+image, and the image stays for whatever tags remain. The tags of a kept
+service stay. Pulled images never match and are never touched. Deletes run
+without `force`, so Docker itself protects an image another container uses.
 
 **Policy lives in the app's compose file.** `dev-lease.keep` on a service or
 a volume, and `dev-lease.remove-after` on a service, let a stack say what
@@ -136,10 +136,11 @@ puts the lease back as it was, so the record is never lost to a retry.
 
 **Standard library and an allowlisted API.** One static Go binary with no
 dependencies. The Docker client can only make the calls it needs (the version
-check, the listings, an inspect of its own container, stop and the four
-deletes, and for the dashboard three reads: a container's last log lines, its
-memory, and the volume sizes); anything else is refused in code, down to the
-query parameters. The process starts as root only to switch to the socket's
+check, the listings, an inspect of its own container, an inspect of an image
+by tag to check the tag right before deleting it, stop and the four deletes,
+and for the dashboard three reads: a container's last log lines, its memory,
+and the volume sizes); anything else is refused in code, down to the query
+parameters. The process starts as root only to switch to the socket's
 group and then to uid 65532.
 
 **Mounting the socket is root on the host.** The README says so before

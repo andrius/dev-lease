@@ -396,3 +396,99 @@ func TestRemovalOfALabelledImageWithSeveralTags(t *testing.T) {
 		})
 	}
 }
+
+// removeToStoppedAndAged runs the passes up to a due removal: the grant,
+// the stop at expiry, and the backdated stop.
+func (h *harness) removeToStoppedAndAged(t *testing.T) {
+	t.Helper()
+	h.extend("myapp", time.Hour, testNow)
+	h.pass(t)
+	h.cfg.Now = func() time.Time { return testNow.Add(2 * time.Hour) }
+	h.pass(t)
+	h.ageStopped(t)
+}
+
+// The tag rule for an image with several tags, labelled images included:
+// a failing check sends no delete, the image's own service label counts
+// when no container of that service is left, a moved tag is skipped, and
+// a kept service's only tag keeps a labelled image just like an
+// unlabelled one.
+func TestTheTagRuleForLabelledImages(t *testing.T) {
+	labels := func(service string) map[string]string {
+		return map[string]string{docker.ProjectLabel: "myapp", docker.ServiceLabel: service}
+	}
+	webContainer := func(h *harness, image string) {
+		h.srv.AddContainerWithUses("c1", "myapp-web-1", labels("web"), image, nil, nil)
+	}
+
+	t.Run("when the check before a tag delete fails, expect no delete and the removal reported failed", func(t *testing.T) {
+		h := newHarness(t)
+		webContainer(h, "sha256:img")
+		h.srv.AddLabels("image", "sha256:img", "myapp-web:latest", labels("web"))
+		h.srv.SetImageTags("sha256:img", "myapp-web:latest", "acme/web:1")
+		h.srv.RefuseInspect("myapp-web:latest", 500)
+		h.removeToStoppedAndAged(t)
+		rep := h.pass(t)
+
+		for _, c := range h.srv.Calls() {
+			if c.Method == "DELETE" && strings.Contains(c.Path, "/images/") {
+				t.Fatalf("an image delete was sent after a failed check: %s", c.Path)
+			}
+		}
+		if got := h.srv.ImageTags("sha256:img"); !slices.Equal(got, []string{"myapp-web:latest", "acme/web:1"}) {
+			t.Fatalf("tags = %v, want both untouched", got)
+		}
+		if !slices.Contains(rep.Failed, "myapp-web:latest") || slices.Contains(rep.Removed, "myapp") {
+			t.Fatalf("Failed = %v, Removed = %v; want the tag failed and the project not removed cleanly", rep.Failed, rep.Removed)
+		}
+	})
+
+	t.Run("when no container of the image's own service is left, expect its label to find the tags", func(t *testing.T) {
+		h := newHarness(t)
+		webContainer(h, "sha256:web")
+		h.srv.AddLabels("image", "sha256:web", "myapp-web:latest", labels("web"))
+		h.srv.AddLabels("image", "sha256:worker", "myapp-worker:latest", labels("worker"))
+		h.srv.SetImageTags("sha256:worker", "myapp-worker:latest", "myapp-worker:v2")
+		h.removeToStoppedAndAged(t)
+		h.pass(t)
+
+		if h.srv.Has("image", "sha256:worker") {
+			t.Fatalf("the worker image survived with tags %v", h.srv.ImageTags("sha256:worker"))
+		}
+	})
+
+	t.Run("when a labelled image's tag moved after the listing, expect the fresh build untouched", func(t *testing.T) {
+		h := newHarness(t)
+		webContainer(h, "sha256:img")
+		h.srv.AddLabels("image", "sha256:img", "myapp-web:latest", labels("web"))
+		h.srv.SetImageTags("sha256:img", "myapp-web:latest", "acme/web:1")
+		h.srv.AddLabels("image", "sha256:fresh", "sha256:fresh", labels("web"))
+		h.srv.SetImageTags("sha256:fresh")
+		h.removeToStoppedAndAged(t)
+		h.armMoveBeforeTagCall("myapp-web:latest", "sha256:fresh")
+		h.pass(t)
+
+		if got := h.srv.ImageTags("sha256:fresh"); !slices.Equal(got, []string{"myapp-web:latest"}) {
+			t.Fatalf("the fresh build's tags = %v (present %v), want [myapp-web:latest]", got, h.srv.Has("image", "sha256:fresh"))
+		}
+	})
+
+	t.Run("when a labelled image's only tag is a kept service's, expect the image kept", func(t *testing.T) {
+		h := newHarness(t)
+		h.srv.AddContainerWithUses("c1", "myapp-web-1", map[string]string{
+			docker.ProjectLabel: "myapp", docker.ServiceLabel: "web", "dev-lease.keep": "true",
+		}, "sha256:current", nil, nil)
+		h.srv.AddLabels("image", "sha256:current", "myapp-web:v2", labels("web"))
+		h.srv.AddLabels("image", "sha256:stale", "myapp-web:v1", labels("web"))
+		h.removeToStoppedAndAged(t)
+		plan := h.planNow(t, "myapp")
+		h.pass(t)
+
+		if !h.srv.Has("image", "sha256:stale") {
+			t.Fatal("the kept service's older build was deleted")
+		}
+		if len(plan.Images) != 0 || !slices.Contains(plan.Kept, "myapp-web:v1") {
+			t.Fatalf("plan images %v, kept %v; want nothing removed and myapp-web:v1 kept", plan.Images, plan.Kept)
+		}
+	})
+}

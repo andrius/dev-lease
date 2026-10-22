@@ -196,6 +196,13 @@ func (s *Server) MoveTag(tag, toID string) {
 	to.tags = append(tagsOf(to), tag)
 }
 
+// RefuseInspect makes GET /images/<ref>/json answer the given status.
+func (s *Server) RefuseInspect(ref string, status int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refuse["inspect:"+ref] = status
+}
+
 // ImageTags returns the repository tags an image has now.
 func (s *Server) ImageTags(id string) []string {
 	s.mu.Lock()
@@ -781,6 +788,10 @@ func (s *Server) deleteImage(w http.ResponseWriter, ref string) int {
 func (s *Server) inspectImage(w http.ResponseWriter, ref string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if status := s.refuse["inspect:"+ref]; status != 0 {
+		writeJSON(w, status, map[string]string{"message": "refused"})
+		return status
+	}
 	if o, ok := s.images[ref]; ok {
 		writeJSON(w, http.StatusOK, map[string]any{"Id": o.id, "RepoTags": tagsOf(o)})
 		return http.StatusOK

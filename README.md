@@ -115,13 +115,14 @@ stopped stack listed until it is removed. An image with one tag is removed
 by id. An image with several tags (identical builds share one image, and
 you may have tagged it yourself) loses only the stack's own
 `<project>-<service>` tags, each checked to still name that image right
-before its delete; another stack's tag or a name of your own keeps the
-image. Pulled images such as `postgres:16-alpine` never match and are never
-removed, and Docker itself refuses to delete an image another container
-uses. Compose can give two stacks the same image name: service `feat-web`
-of `myapp` and service `web` of `myapp-feat` both build `myapp-feat-web`,
-so removing `myapp` removes that image too, even when `myapp-feat` is not
-managed.
+before its delete; another stack's tag, or a name of your own in another
+repository, keeps the image; a tag of yours in the stack's own repository,
+such as `myapp-web:good`, goes with the others. Pulled images such as
+`postgres:16-alpine` never match and are never removed, and Docker itself
+refuses to delete an image another container uses. Compose can give two
+stacks the same image name: service `feat-web` of `myapp` and service `web`
+of `myapp-feat` both build `myapp-feat-web`, so removing `myapp` removes
+that image too, even when `myapp-feat` is not managed.
 
 An object Docker refuses or fails to remove is logged and left in place;
 if that leaves the stack present, it is treated as a new one: it gets the
