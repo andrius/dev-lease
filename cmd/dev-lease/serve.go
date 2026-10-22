@@ -446,10 +446,24 @@ func startListing(ctx context.Context, cli *docker.Client, st lease.Store, patte
 		err4 := allImgsErr
 		var imgs []docker.Object
 		if err4 == nil {
-			services := reaper.ServicesOf(conts, leases[p].Services)
+			// Every image carrying the project's label, and the tags of an
+			// unlabelled image the removal deletes or keeps for a kept
+			// service, one entry per tag.
+			scope := reaper.NewImageScope(p, conts, leases[p].Services)
 			for _, i := range allImgs {
-				if i.Labels[docker.ProjectLabel] == p || reaper.ImageRemovable(i, p, services, nil) {
+				if i.Labels[docker.ProjectLabel] == p {
 					imgs = append(imgs, i)
+					continue
+				}
+				if i.Labels[docker.ProjectLabel] != "" {
+					continue
+				}
+				step := scope.Step(i)
+				for _, r := range step.Remove {
+					imgs = append(imgs, docker.Object{ID: i.ID, Name: r.Name})
+				}
+				for _, k := range step.Kept {
+					imgs = append(imgs, docker.Object{ID: i.ID, Name: k})
 				}
 			}
 		}

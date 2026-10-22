@@ -6,8 +6,9 @@ package reaper
 // removed with the rest of the stack; without a services record (no sweep
 // saw the containers before the compose down) it stays, because the
 // removal cannot recognise it as the stack's own build. An unlabelled
-// image alone never makes the project present, and another project's
-// removal never touches it. RemoveNow shares the rule.
+// image alone never makes a project without a lease present (it carries
+// no label to find the project by), and another project's removal never
+// touches it. RemoveNow shares the rule.
 
 import (
 	"context"
@@ -80,10 +81,11 @@ func TestSweepRemovalWithoutRecordLeavesUnlabelledBuiltImage(t *testing.T) {
 	if !h.srv.Has("image", "sha256:unlab") {
 		t.Fatal("the unlabelled built image was removed without a services record")
 	}
-	// The skip is reported in the log, not charged to the removal's
-	// report.
-	if !strings.Contains(h.log.String(), "remove-image") {
-		t.Fatalf("the log does not report the image skip:\n%s", h.log.String())
+	// Without the record the image is no part of the stack, so the
+	// removal does not mention it; the volume's line shows the log was
+	// written.
+	if strings.Contains(h.log.String(), "remove-image") || !strings.Contains(h.log.String(), "remove-volume") {
+		t.Fatalf("want a remove-volume line and no remove-image line:\n%s", h.log.String())
 	}
 	if _, ok := h.leases()["myapp"]; ok {
 		t.Fatal("the lease was not cleared")
@@ -145,7 +147,7 @@ func TestRemoveNowRemovesUnlabelledBuiltImage(t *testing.T) {
 	}, "sha256:pg", nil, nil)
 	srv.AddLabels("image", "sha256:unlab", "myapp-web:latest", nil)
 	srv.AddLabels("image", "sha256:pg", "postgres:16-alpine", nil)
-	srv.AddLabels("image", "sha256:xlab", "myapp-web:latest", map[string]string{
+	srv.AddLabels("image", "sha256:xlab", "myapp-web:old", map[string]string{
 		docker.ProjectLabel: "other", docker.ServiceLabel: "web",
 	})
 	srv.Add("volume", "v1", "myapp_data", "myapp")

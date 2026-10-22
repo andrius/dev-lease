@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -43,6 +44,7 @@ type obj struct {
 	tty             bool      // containers only: logs are a raw stream
 	inspectID       string    // containers only: Id answered by inspect
 	untagged        bool      // images only: no repository tag left
+	tags            []string  // images only: every repository tag, when SetImageTags ran
 	networks        []string  // containers only: attached network names
 	mounts          []string  // containers only: mounted named volumes
 	created         time.Time // containers only: listing Created (Unix seconds)
@@ -167,6 +169,39 @@ func (s *Server) AddUntaggedImage(id, project string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.images[id].untagged = true
+}
+
+// SetImageTags gives an image its full list of repository tags, so an
+// image that several builds produced with the same content (one id,
+// several tags) can be modelled. Without it an image's only tag is its
+// name.
+func (s *Server) SetImageTags(id string, tags ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.images[id].tags = append([]string{}, tags...)
+}
+
+// ImageTags returns the repository tags an image has now.
+func (s *Server) ImageTags(id string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	o, ok := s.images[id]
+	if !ok {
+		return nil
+	}
+	return tagsOf(o)
+}
+
+// tagsOf is an image's repository tags: the list SetImageTags set, else
+// its name for an image with a sha256 id that still has a tag.
+func tagsOf(o *obj) []string {
+	if o.tags != nil {
+		return append([]string{}, o.tags...)
+	}
+	if strings.HasPrefix(o.id, "sha256:") && !o.untagged {
+		return []string{o.name}
+	}
+	return nil
 }
 
 // AddContainerWithImage creates a running container that was created from
@@ -460,7 +495,7 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) int {
 		case "volumes":
 			return s.delete(w, r, "volume", id)
 		case "images":
-			return s.delete(w, r, "image", id)
+			return s.deleteImage(w, id)
 		}
 	}
 	return notFound(w)
@@ -590,8 +625,10 @@ func (s *Server) list(w http.ResponseWriter, set map[string]*obj, r *http.Reques
 	out := make([]item, 0, len(objs))
 	for _, o := range objs {
 		it := item{Id: o.id, Name: o.name, Labels: o.labels}
-		if strings.HasPrefix(o.id, "sha256:") && !o.untagged {
-			it.RepoTags = []string{o.name}
+		if kind == "image" {
+			s.mu.Lock()
+			it.RepoTags = tagsOf(o)
+			s.mu.Unlock()
 		}
 		out = append(out, it)
 	}
@@ -642,22 +679,6 @@ func (s *Server) stopOrRemove(w http.ResponseWriter, r *http.Request, kind, id s
 			return http.StatusConflict
 		}
 	}
-	if kind == "image" {
-		// An image any container still references cannot be removed.
-		s.mu.Lock()
-		inUse := false
-		for _, c := range s.containers {
-			if c.imageID == id {
-				inUse = true
-				break
-			}
-		}
-		s.mu.Unlock()
-		if inUse {
-			writeJSON(w, http.StatusConflict, map[string]string{"message": "image is in use"})
-			return http.StatusConflict
-		}
-	}
 	if isDelete {
 		s.mu.Lock()
 		delete(s.set(kind), id)
@@ -666,6 +687,87 @@ func (s *Server) stopOrRemove(w http.ResponseWriter, r *http.Request, kind, id s
 	_ = o
 	w.WriteHeader(http.StatusNoContent)
 	return http.StatusNoContent
+}
+
+// deleteImage answers DELETE /images/<ref> like the daemon without force:
+// ref is an image id or one repository tag. A tag the image shares with
+// other tags is only untagged; its last tag goes with the image. An id
+// whose tags span several repositories is refused, and so is removing an
+// image a container uses, by its id or by its last tag.
+func (s *Server) deleteImage(w http.ResponseWriter, ref string) int {
+	s.mu.Lock()
+	o, byID := s.images[ref]
+	if !byID {
+		var owners []*obj
+		for _, img := range s.images {
+			if slices.Contains(tagsOf(img), ref) {
+				owners = append(owners, img)
+			}
+		}
+		if len(owners) > 1 {
+			// A tag names exactly one image on a daemon: a fixture that
+			// gives two images the same tag is a test setup error, answered
+			// the same way every time instead of by map order.
+			s.mu.Unlock()
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "fakedocker: tag " + ref + " is on two images"})
+			return http.StatusInternalServerError
+		}
+		if len(owners) == 1 {
+			o = owners[0]
+		}
+	}
+	if o == nil {
+		s.mu.Unlock()
+		return notFound(w)
+	}
+	status := s.refuse["image:"+o.id]
+	fn := s.beforeRemove["image:"+o.id]
+	s.mu.Unlock()
+	if status != 0 {
+		writeJSON(w, status, map[string]string{"message": "refused"})
+		return status
+	}
+	if fn != nil {
+		fn()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tags := tagsOf(o)
+	if !byID && len(tags) > 1 {
+		o.tags = slices.DeleteFunc(tags, func(t string) bool { return t == ref })
+		writeJSON(w, http.StatusOK, []map[string]string{{"Untagged": ref}})
+		return http.StatusOK
+	}
+	if byID && repositories(tags) > 1 {
+		writeJSON(w, http.StatusConflict, map[string]string{"message": "conflict: unable to delete " + o.id + " (must be forced) - image is referenced in multiple repositories"})
+		return http.StatusConflict
+	}
+	for _, c := range s.containers {
+		if c.imageID == o.id {
+			writeJSON(w, http.StatusConflict, map[string]string{"message": "image is in use"})
+			return http.StatusConflict
+		}
+	}
+	delete(s.images, o.id)
+	if byID {
+		w.WriteHeader(http.StatusNoContent)
+		return http.StatusNoContent
+	}
+	writeJSON(w, http.StatusOK, []map[string]string{{"Untagged": ref}, {"Deleted": o.id}})
+	return http.StatusOK
+}
+
+// repositories counts the distinct repositories among an image's tags:
+// the part before the tag colon.
+func repositories(tags []string) int {
+	set := map[string]bool{}
+	for _, t := range tags {
+		if i := strings.LastIndex(t, ":"); i > strings.LastIndex(t, "/") {
+			t = t[:i]
+		}
+		set[t] = true
+	}
+	return len(set)
 }
 
 func (s *Server) delete(w http.ResponseWriter, r *http.Request, kind, id string) int {

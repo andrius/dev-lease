@@ -343,6 +343,21 @@ func TagMatchesService(project, service string, tags []string) bool {
 	return false
 }
 
+// TagService returns the service among services whose <project>-<service>
+// is exactly the repository of tag, the way TagMatchesService matches.
+func TagService(project string, services []string, tag string) (string, bool) {
+	repo, ok := repository(tag)
+	if !ok {
+		return "", false
+	}
+	for _, s := range services {
+		if repo == project+"-"+s {
+			return s, true
+		}
+	}
+	return "", false
+}
+
 // repository returns the repository part of a repository tag: everything
 // before the last ':' when that colon comes after the last '/' (a tag
 // colon), registry host and path included; otherwise the tag has no tag
@@ -579,9 +594,11 @@ func (c *Client) RemoveVolume(ctx context.Context, name string) error {
 	return err
 }
 
-// RemoveImage removes one image.
-func (c *Client) RemoveImage(ctx context.Context, id string) error {
-	_, err := c.do(ctx, http.MethodDelete, "/images/"+url.PathEscape(id))
+// RemoveImage removes one image by id, or one repository tag of an image
+// by its name: the daemon untags an image that has other tags, and
+// removes the image with its last tag.
+func (c *Client) RemoveImage(ctx context.Context, ref string) error {
+	_, err := c.do(ctx, http.MethodDelete, "/images/"+url.PathEscape(ref))
 	return err
 }
 

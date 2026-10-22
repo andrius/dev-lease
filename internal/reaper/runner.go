@@ -124,7 +124,7 @@ func (r *Runner) stopNowLocked(ctx context.Context, project, via string) (Report
 		return rep, err
 	}
 	if _, hasLease := leases[project]; !hasLease {
-		empty, err := projectEmpty(ctx, r.Cli, project)
+		empty, err := projectEmpty(ctx, r.Cli, project, nil)
 		if err != nil {
 			return rep, err
 		}
@@ -193,7 +193,7 @@ func (r *Runner) removeNowLocked(ctx context.Context, project string, opts Remov
 	// A name with neither a lease nor a stack is ErrNoStack before the
 	// never-remove check: nothing exists, so nothing can be never-remove.
 	if !hasLease {
-		empty, err := projectEmpty(ctx, r.Cli, project)
+		empty, err := projectEmpty(ctx, r.Cli, project, nil)
 		if err != nil {
 			return rep, err
 		}

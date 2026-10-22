@@ -131,7 +131,9 @@ func TestDashboardStopAndControlRemoveAgainstRealDocker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listing volumes: %v", err)
 	}
-	imgs, err := cli.Images(ctx, it)
+	// Images unfiltered, like the detail page and the removal: Compose v2
+	// builds images without labels, so a label filter would miss them.
+	imgs, err := cli.Images(ctx, "")
 	if err != nil {
 		t.Fatalf("listing images: %v", err)
 	}
@@ -203,8 +205,16 @@ func TestDashboardStopAndControlRemoveAgainstRealDocker(t *testing.T) {
 		if leftN := dockerNames(t, "networks", "{{.Name}}", projectLabel(it)); !sameSet(leftN, keptNames(nets)) {
 			t.Fatalf("networks left = %v, want the kept %v", leftN, keptNames(nets))
 		}
-		if leftI := dockerNames(t, "images", "{{.Repository}}:{{.Tag}}", projectLabel(it)); !sameSet(leftI, keptNames(imgs)) {
-			t.Fatalf("images left = %v, want the kept %v", leftI, keptNames(imgs))
+		// Images by tag, unfiltered: the plan names images by their
+		// tags, and Compose v2 builds them without labels.
+		var keptTags []string
+		for _, k := range plan.Kept {
+			if strings.HasPrefix(k, it+"-") && strings.Contains(k, ":") {
+				keptTags = append(keptTags, k)
+			}
+		}
+		if leftI := imageTagsWithPrefix(t, it+"-"); !sameSet(leftI, keptTags) {
+			t.Fatalf("image tags left = %v, want the kept %v", leftI, keptTags)
 		}
 		leases, err := st.Read()
 		if err != nil {
@@ -334,6 +344,23 @@ func dashCSRF(t *testing.T, page string) string {
 // dockerNames lists the names of one object type under one project label:
 // containers by display name, volumes by name, networks by name, images by
 // repo:tag.
+// imageTagsWithPrefix lists every repository tag on the daemon, unfiltered,
+// that starts with prefix.
+func imageTagsWithPrefix(t *testing.T, prefix string) []string {
+	t.Helper()
+	out, err := exec.Command("docker", "images", "--format", "{{.Repository}}:{{.Tag}}").Output()
+	if err != nil {
+		t.Fatalf("docker images: %v", err)
+	}
+	var tags []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.HasPrefix(line, prefix) {
+			tags = append(tags, line)
+		}
+	}
+	return tags
+}
+
 func dockerNames(t *testing.T, kind, format, label string) []string {
 	t.Helper()
 	args := []string{"--format", format, "--filter", "label=" + label}

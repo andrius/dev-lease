@@ -358,18 +358,11 @@ func PassWith(ctx context.Context, cli *docker.Client, st lease.Store, cfg Confi
 				if !ok {
 					continue
 				}
+				// Each field is written on its own: a label the store already
+				// holds (a revive's replacement lease inherits it) must not
+				// keep the services or the delay from being written.
 				if ch.setLabel {
-					if ch.label == nil {
-						if l.LabelRemoveAfter == nil {
-							continue
-						}
-						l.LabelRemoveAfter = nil
-					} else {
-						if l.LabelRemoveAfter != nil && *l.LabelRemoveAfter == *ch.label {
-							continue
-						}
-						l.LabelRemoveAfter = ch.label
-					}
+					l.LabelRemoveAfter = ch.label
 				}
 				if ch.after != nil && l.State == lease.StateStopped &&
 					(l.RemoveAfter == nil || *l.RemoveAfter != *ch.after || l.RemoveAfterFrom != ch.afterFrom) {
@@ -407,7 +400,7 @@ func PassWith(ctx context.Context, cli *docker.Client, st lease.Store, cfg Confi
 			// Nothing left on the daemon? The stopped lease has nothing to
 			// remove, so it would only keep serve from going idle until the
 			// removal deadline: drop it now.
-			empty, err := projectEmpty(ctx, cli, name)
+			empty, err := projectEmpty(ctx, cli, name, l.Services)
 			if err != nil {
 				act(log, via, now(), name, "remove", "", "", err)
 				continue
@@ -490,12 +483,12 @@ func anyContainerRunning(ctx context.Context, cli *docker.Client, project string
 // volumes or images beyond what a kept container uses. The first non-empty
 // listing short-circuits, so a stopped project with objects costs one
 // container listing per pass.
-func projectEmpty(ctx context.Context, cli *docker.Client, project string) (bool, error) {
+func projectEmpty(ctx context.Context, cli *docker.Client, project string, recorded []string) (bool, error) {
 	conts, err := cli.Containers(ctx, project)
 	if err != nil {
 		return false, err
 	}
-	keptNets, keptVols, keptImgs := keptUses(conts)
+	keptNets, keptVols, _ := keptUses(conts)
 	for _, c := range conts {
 		if !docker.Kept(c) {
 			return false, nil
@@ -519,18 +512,19 @@ func projectEmpty(ctx context.Context, cli *docker.Client, project string) (bool
 			return false, nil
 		}
 	}
-	imgs, err := cli.Images(ctx, project)
+	// Presence's image rule: only an image the removal would actually
+	// delete something of keeps the lease (ImageScope.Step); an untagged
+	// leftover, an image that only inherited the project label, an image
+	// a kept container runs from or a kept service's tag never does. The
+	// listing is unfiltered so the stack's unlabelled built images
+	// (Compose v2) count too, through the services the lease recorded.
+	imgs, err := cli.Images(ctx, "")
 	if err != nil {
 		return false, err
 	}
+	scope := NewImageScope(project, conts, recorded)
 	for _, i := range imgs {
-		if keptImgs[i.ID] {
-			continue
-		}
-		// Presence's image rule: only an image the removal would actually
-		// remove keeps the lease; an untagged leftover or an image that
-		// only inherited the project label never does.
-		if docker.ImageTagMatches(project, i) {
+		if len(scope.Step(i).Remove) > 0 {
 			return false, nil
 		}
 	}
@@ -906,16 +900,7 @@ func removeProject(ctx context.Context, cli *docker.Client, st lease.Store, proj
 			return nil, nil, false, nil
 		}
 	}
-	usedImgs := map[string]bool{}
-	keptNets, keptVols, keptImgs := keptUses(conts)
-	for _, c := range conts {
-		if docker.Kept(c) {
-			continue
-		}
-		if c.ImageID != "" {
-			usedImgs[c.ImageID] = true
-		}
-	}
+	keptNets, keptVols, _ := keptUses(conts)
 	nets, err := cli.Networks(ctx, project)
 	if err != nil {
 		act(log, via, now(), project, "remove", "", "", err)
@@ -996,20 +981,17 @@ func removeProject(ctx context.Context, cli *docker.Client, st lease.Store, proj
 
 	// Images: the removal lists them unfiltered, so the project's own
 	// unlabelled built images (Compose v2 builds images without labels)
-	// are in view too, and the rule below keeps only what is not this
-	// removal's. An image is removed when a container of the project ran
-	// from it (collected in this pass), or one of its tags has the
-	// <project>-<service> shape for the image's own service label, or it
-	// carries no project label at all and one of its tags has the
-	// repository exactly <project>-<service> for one of the project's
-	// services - the service labels of the containers in this listing
-	// or, when no container is left, the services the lease recorded.
-	// Images of another project, untagged leftovers, images that only
-	// inherited the project label, custom-named images no container runs
-	// from and pulled images such as postgres:16-alpine are never
-	// removed: they are reported in the log only. A cancelled context
-	// skips the listing altogether.
-	svcs := ServicesOf(conts, leaseServices)
+	// are in view too, and the image rule (ImageScope.Step) decides what
+	// of each is this removal's: an image carrying the project's label is
+	// deleted by id, an unlabelled one tag by tag, the services being the
+	// service labels of the containers in this listing or, when no
+	// container is left, the services the lease recorded. What stays for
+	// a kept service or container, and the project's images that stay for
+	// another reason, are logged as skipped; an image that is no part of
+	// the project (another project's, a pulled image no container of the
+	// project ran from, a dangling image) is not mentioned at all. A
+	// cancelled context skips the listing altogether.
+	scope := NewImageScope(project, conts, leaseServices)
 	var imgs []docker.Object
 	if ctx.Err() == nil {
 		imgs, err = cli.Images(ctx, "")
@@ -1023,26 +1005,17 @@ func removeProject(ctx context.Context, cli *docker.Client, st lease.Store, proj
 		if ctx.Err() != nil {
 			break
 		}
-		// An image of another project is never this removal's: it stays
-		// untouched, silently - reporting it skipped would charge the
-		// other project's images against this removal's report.
-		if p := i.Labels[docker.ProjectLabel]; p != "" && p != project {
-			continue
+		step := scope.Step(i)
+		for _, k := range step.Kept {
+			actSkip(log, via, now(), project, "remove-image", i.ID, k, step.Reason)
+			skipped = append(skipped, k)
 		}
-		if keptImgs[i.ID] {
-			actSkip(log, via, now(), project, "remove-image", i.ID, i.Name, "a kept container of the project runs from it")
-			skipped = append(skipped, i.Name)
-			continue
+		if len(step.Kept) == 0 && len(step.Remove) == 0 && step.Reason != "" {
+			actSkip(log, via, now(), project, "remove-image", i.ID, i.Name, step.Reason)
 		}
-		if !ImageRemovable(i, project, svcs, usedImgs) {
-			reason := "no container of the project runs from it and its tags do not carry the project's service name"
-			if i.Untagged {
-				reason = "untagged leftover of an earlier build"
-			}
-			actSkip(log, via, now(), project, "remove-image", i.ID, i.Name, reason)
-			continue
+		for _, r := range step.Remove {
+			removeOne("remove-image", i.ID, r.Name, "daemon refused: in use", cli.RemoveImage(ctx, r.Ref))
 		}
-		removeOne("remove-image", i.ID, i.Name, "daemon refused: in use", cli.RemoveImage(ctx, i.ID))
 	}
 
 	// A cancellation cuts the removal short: the project is reported as

@@ -472,56 +472,33 @@ func Details(ctx context.Context, cli *docker.Client, st lease.Store, cfg reaper
 	}
 	sort.Strings(d.Networks)
 
-	// The image split follows the removal's rules (reaper.ImageRemovable):
-	// an image a container of the project ran from, an image with a
-	// <project>-<service> tag for its own service label, and an unlabelled
-	// image (Compose v2 builds images without labels) with a repository
-	// tag exactly <project>-<service> for one of the project's services
-	// is removed; everything else stays. The listing is unfiltered, so
-	// the unlabelled built images and the pulled images the containers
-	// run from are in view. The images of other projects are not part of
-	// this project's split at all: the removal never looks at them.
+	// The image split follows the removal's rule (reaper.ImageScope.Step):
+	// RemovedImages is what the removal deletes, an image by id or an
+	// unlabelled built image's own tags (Compose v2 builds images without
+	// labels); KeptImages is what stays of the stack's images, a kept
+	// service's tags and the pulled images its containers run from
+	// included. The listing is unfiltered, so the unlabelled built images
+	// are in view; an image that is no part of the stack is in neither.
 	imgs, err := cli.Images(ctx, "")
 	if err != nil {
 		return Detail{}, err
 	}
 	sort.Slice(imgs, func(i, j int) bool { return imgs[i].Name < imgs[j].Name })
-	used, keptImgs := map[string]bool{}, map[string]bool{}
-	for _, c := range conts {
-		if c.ImageID == "" {
-			continue
-		}
-		if docker.Kept(c) {
-			keptImgs[c.ImageID] = true
-		} else {
-			used[c.ImageID] = true
-		}
-	}
 	leases, lerr := st.Read()
 	if lerr != nil {
 		return Detail{}, lerr
 	}
 	l := leases[name]
 	svcs := reaper.ServicesOf(conts, l.Services)
+	scope := reaper.NewImageScope(name, conts, l.Services)
 	for _, i := range imgs {
-		p := i.Labels[docker.ProjectLabel]
-		if p != "" && p != name {
-			continue
+		step := scope.Step(i)
+		for _, r := range step.Remove {
+			d.RemovedImages = append(d.RemovedImages, r.Name)
 		}
-		removable := !keptImgs[i.ID] && reaper.ImageRemovable(i, name, svcs, used)
-		if p == "" && !removable && !used[i.ID] && !keptImgs[i.ID] {
-			// An unlabelled image the stack neither built nor runs from:
-			// some other image on the daemon, no part of this stack.
-			continue
-		}
-		nameOf := i.Name
-		if nameOf == "" {
-			nameOf = i.ID
-		}
-		if !removable {
-			d.KeptImages = append(d.KeptImages, nameOf)
-		} else {
-			d.RemovedImages = append(d.RemovedImages, nameOf)
+		d.KeptImages = append(d.KeptImages, step.Kept...)
+		if len(step.Remove) == 0 && len(step.Kept) == 0 && step.Reason != "" {
+			d.KeptImages = append(d.KeptImages, i.Name)
 		}
 	}
 	sort.Strings(d.KeptImages)

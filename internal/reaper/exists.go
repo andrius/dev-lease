@@ -17,7 +17,7 @@ func (r *Runner) Exists(ctx context.Context, project string) (bool, error) {
 	if _, ok := leases[project]; ok {
 		return true, nil
 	}
-	empty, err := projectEmpty(ctx, r.Cli, project)
+	empty, err := projectEmpty(ctx, r.Cli, project, nil)
 	if err != nil {
 		return false, err
 	}
