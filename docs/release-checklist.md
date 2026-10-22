@@ -50,4 +50,4 @@ After the tag push has built the image:
 3. `docker run --rm ghcr.io/andrius/dev-lease:v0.1.0 -version` prints
    `dev-lease v0.1.0`.
 4. `gh attestation verify oci://ghcr.io/andrius/dev-lease:v0.1.0 --owner andrius`
-   passes.
+   passes (gh 2.49 or later).

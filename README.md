@@ -402,7 +402,8 @@ give root.
 ## Images and platforms
 
 The image is `ghcr.io/andrius/dev-lease`, for linux/amd64 and linux/arm64,
-with a build provenance attestation:
+with a build provenance attestation (verify it with gh 2.49 or later; older
+gh has no `attestation` command):
 
 ```bash
 gh attestation verify oci://ghcr.io/andrius/dev-lease:v0.1.0 --owner andrius
