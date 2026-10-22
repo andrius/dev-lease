@@ -341,9 +341,6 @@ func dashCSRF(t *testing.T, page string) string {
 	return m[1]
 }
 
-// dockerNames lists the names of one object type under one project label:
-// containers by display name, volumes by name, networks by name, images by
-// repo:tag.
 // imageTagsWithPrefix lists every repository tag on the daemon, unfiltered,
 // that starts with prefix.
 func imageTagsWithPrefix(t *testing.T, prefix string) []string {
@@ -361,6 +358,9 @@ func imageTagsWithPrefix(t *testing.T, prefix string) []string {
 	return tags
 }
 
+// dockerNames lists the names of one object type under one project label:
+// containers by display name, volumes by name, networks by name, images by
+// repo:tag.
 func dockerNames(t *testing.T, kind, format, label string) []string {
 	t.Helper()
 	args := []string{"--format", format, "--filter", "label=" + label}

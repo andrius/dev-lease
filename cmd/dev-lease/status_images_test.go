@@ -42,3 +42,28 @@ func TestStatusListsUnlabelledBuiltImage(t *testing.T) {
 		t.Errorf("status line = %q, want images=[myapp-web:latest]", line)
 	}
 }
+
+// A pulled image stays out of status also when a kept container runs from
+// it: it is not the stack's own image.
+func TestStatusOmitsAPulledImageOfAKeptContainer(t *testing.T) {
+	st := tempStore(t)
+	t.Setenv("DEV_LEASE_STATE", st.Path)
+	writeHeader(t, st, []string{"myapp"}, 2*time.Hour)
+	srv := fakedocker.New(t)
+	srv.AddContainerWithUses("c1", "myapp-web-1", map[string]string{
+		docker.ProjectLabel: "myapp", docker.ServiceLabel: "web",
+	}, "sha256:built", nil, nil)
+	srv.AddContainerWithUses("c2", "myapp-db-1", map[string]string{
+		docker.ProjectLabel: "myapp", docker.ServiceLabel: "db", "dev-lease.keep": "true",
+	}, "sha256:pg", nil, nil)
+	srv.AddLabels("image", "sha256:built", "myapp-web:latest", nil)
+	srv.AddLabels("image", "sha256:pg", "postgres:16-alpine", nil)
+
+	var out, errOut bytes.Buffer
+	if code := runStatusCmd([]string{"--socket", srv.Socket}, &out, &errOut); code != 0 {
+		t.Fatalf("status = %d (out=%q err=%q)", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "images=[myapp-web:latest]") {
+		t.Errorf("status = %q, want images=[myapp-web:latest]", out.String())
+	}
+}

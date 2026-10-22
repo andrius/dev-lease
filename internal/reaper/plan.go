@@ -115,7 +115,9 @@ type ImageStep struct {
 // builds share one image id, across services and projects, and Docker
 // refuses to delete such an image by id; deleting a tag only untags it
 // while other tags remain, and deletes the image with its last tag
-// unless a container uses it. The tags of a kept service stay.
+// unless a container uses it. The tags of a kept service stay, and so
+// does the whole image when a kept container runs from it and deleting
+// the stack's tags would take its last tag.
 //
 // A pulled image such as postgres:16-alpine is never deleted, whether
 // or not a container ran from it; an image carrying another project's
@@ -149,6 +151,16 @@ func (sc ImageScope) Step(i docker.Object) ImageStep {
 		case len(st.Kept) > 0:
 			st.Reason = "built for a kept service of the project"
 		case len(st.Remove) > 0:
+			if sc.KeptImages[i.ID] && len(st.Remove) == len(i.RepoTags) {
+				// Deleting the stack's tags would take the image's last
+				// tag, which Docker refuses while the kept container runs
+				// from it: the image stays whole.
+				kept := make([]string, 0, len(st.Remove))
+				for _, r := range st.Remove {
+					kept = append(kept, r.Name)
+				}
+				return ImageStep{Kept: kept, Reason: "a kept container of the project runs from it"}
+			}
 		case sc.KeptImages[i.ID]:
 			return ImageStep{Kept: []string{i.Name}, Reason: "a kept container of the project runs from it"}
 		case sc.Used[i.ID]:

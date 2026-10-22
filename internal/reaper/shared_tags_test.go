@@ -234,3 +234,41 @@ func TestReviveRecordsTheServicesWhenTheLabelIsUnchanged(t *testing.T) {
 		t.Fatalf("services after the revive = %v, want [web worker]", l.Services)
 	}
 }
+
+// A kept container runs from an unlabelled image whose only tag is a
+// non-kept service's (a kept worker with `image: myapp-web`): Docker
+// would refuse to delete that last tag, so the image stays whole, the
+// plan lists it as kept and the removal does not try.
+func TestRemovalKeepsTheImageAKeptContainerRunsFromWhenNoTagWouldRemain(t *testing.T) {
+	h := newHarness(t)
+	h.srv.AddContainerWithUses("c1", "myapp-web-1", map[string]string{
+		docker.ProjectLabel: "myapp", docker.ServiceLabel: "web",
+	}, "sha256:img", nil, nil)
+	h.srv.AddContainerWithUses("c2", "myapp-worker-1", map[string]string{
+		docker.ProjectLabel: "myapp", docker.ServiceLabel: "worker", "dev-lease.keep": "true",
+	}, "sha256:img", nil, nil)
+	h.srv.AddLabels("image", "sha256:img", "myapp-web:latest", nil)
+	h.extend("myapp", time.Hour, testNow)
+	h.pass(t)
+	h.cfg.Now = func() time.Time { return testNow.Add(2 * time.Hour) }
+	h.pass(t)
+	h.ageStopped(t)
+	plan := h.planNow(t, "myapp")
+	h.pass(t)
+
+	if len(plan.Images) != 0 || !slices.Contains(plan.Kept, "myapp-web:latest") {
+		t.Fatalf("plan images %v, kept %v; want no image removed and myapp-web:latest kept", plan.Images, plan.Kept)
+	}
+	if got := h.srv.ImageTags("sha256:img"); !slices.Equal(got, []string{"myapp-web:latest"}) {
+		t.Fatalf("tags left = %v, want [myapp-web:latest]", got)
+	}
+	var results []string
+	for _, l := range h.logLines() {
+		if l["action"] == "remove-image" {
+			results = append(results, l["name"].(string)+" "+l["result"].(string))
+		}
+	}
+	if !slices.Equal(results, []string{"myapp-web:latest skipped: a kept container of the project runs from it"}) {
+		t.Fatalf("remove-image lines = %q, want one skip for the kept container", results)
+	}
+}

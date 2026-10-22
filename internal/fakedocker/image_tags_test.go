@@ -48,6 +48,17 @@ func TestDeleteImageFollowsTheDaemonsTagRules(t *testing.T) {
 			t.Fatalf("tags = %v, want both", got)
 		}
 	})
+	t.Run("when the id is deleted and it has two tags of one repository, expect 409", func(t *testing.T) {
+		s := New(t)
+		s.AddLabels("image", "sha256:two", "myapp-web:latest", nil)
+		s.SetImageTags("sha256:two", "myapp-web:latest", "myapp-web:v2")
+		if _, status := del(t, client(t, s.Socket), "/v1.47/images/sha256:two"); status != 409 {
+			t.Fatalf("DELETE by id = %d, want 409", status)
+		}
+		if !s.Has("image", "sha256:two") {
+			t.Fatal("the image was deleted")
+		}
+	})
 	t.Run("when one of two tags is deleted, expect it untagged and the image kept", func(t *testing.T) {
 		s, del := newShared(t)
 		if _, status := del("myapp-web:latest"); status != 200 {

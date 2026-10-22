@@ -693,7 +693,9 @@ func (s *Server) stopOrRemove(w http.ResponseWriter, r *http.Request, kind, id s
 // ref is an image id or one repository tag. A tag the image shares with
 // other tags is only untagged; its last tag goes with the image. An id
 // whose tags span several repositories is refused, and so is removing an
-// image a container uses, by its id or by its last tag.
+// image a container uses, by its id or by its last tag. Like the
+// daemon's isSingleReference, an id is refused whenever the image has
+// more than one tag, even within one repository.
 func (s *Server) deleteImage(w http.ResponseWriter, ref string) int {
 	s.mu.Lock()
 	o, byID := s.images[ref]
@@ -738,7 +740,7 @@ func (s *Server) deleteImage(w http.ResponseWriter, ref string) int {
 		writeJSON(w, http.StatusOK, []map[string]string{{"Untagged": ref}})
 		return http.StatusOK
 	}
-	if byID && repositories(tags) > 1 {
+	if byID && len(tags) > 1 {
 		writeJSON(w, http.StatusConflict, map[string]string{"message": "conflict: unable to delete " + o.id + " (must be forced) - image is referenced in multiple repositories"})
 		return http.StatusConflict
 	}
@@ -755,19 +757,6 @@ func (s *Server) deleteImage(w http.ResponseWriter, ref string) int {
 	}
 	writeJSON(w, http.StatusOK, []map[string]string{{"Untagged": ref}, {"Deleted": o.id}})
 	return http.StatusOK
-}
-
-// repositories counts the distinct repositories among an image's tags:
-// the part before the tag colon.
-func repositories(tags []string) int {
-	set := map[string]bool{}
-	for _, t := range tags {
-		if i := strings.LastIndex(t, ":"); i > strings.LastIndex(t, "/") {
-			t = t[:i]
-		}
-		set[t] = true
-	}
-	return len(set)
 }
 
 func (s *Server) delete(w http.ResponseWriter, r *http.Request, kind, id string) int {

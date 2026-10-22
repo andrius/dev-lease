@@ -463,7 +463,11 @@ func startListing(ctx context.Context, cli *docker.Client, st lease.Store, patte
 					imgs = append(imgs, docker.Object{ID: i.ID, Name: r.Name})
 				}
 				for _, k := range step.Kept {
-					imgs = append(imgs, docker.Object{ID: i.ID, Name: k})
+					// Only the stack's own tags: a pulled image a kept
+					// container runs from is not the stack's.
+					if _, own := docker.TagService(p, scope.Services, k); own {
+						imgs = append(imgs, docker.Object{ID: i.ID, Name: k})
+					}
 				}
 			}
 		}

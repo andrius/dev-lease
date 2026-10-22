@@ -227,7 +227,8 @@ so a state file from a newer format is never misread.
       and Docker refuses to delete such an image by id, while deleting a
       tag only untags it as long as other tags remain and deletes the image
       with its last tag (refused while a container uses it). The tags of a
-      kept service stay. An unlabelled image alone never makes a project
+      kept service stay, and so does the whole image when a kept container
+      runs from it and its last tag would go. An unlabelled image alone never makes a project
       without a lease present.
 
    Whatever the outcome, the lease is deleted at the end. If objects are
