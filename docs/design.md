@@ -71,10 +71,11 @@ whole repository, so a registry image of the same name is not matched).
 Compose v2 builds images without the project label, so an unlabelled image
 counts when its name is exactly `<project>-<service>` for one of the
 project's own services, which every sweep records in the lease. Such an
-image is deleted by tag, not by id: identical builds share one image id
-across services and projects, Docker refuses to delete an image with
-several tags by id, and deleting one tag leaves the image to the stacks
-whose tags remain. Pulled images never match and are never touched.
+image goes by id when it has one tag. With several tags (identical builds
+share one image id across services and projects, and a name of your own
+counts too) Docker refuses a delete by id, so the stack's own tags are
+deleted one by one, each first checked to still name the listed image, and
+the image stays for whatever tags remain. Pulled images never match and are never touched.
 Deletes run without `force`, so Docker itself protects an image another
 container uses.
 

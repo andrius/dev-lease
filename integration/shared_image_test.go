@@ -103,3 +103,71 @@ func TestRemovalUntagsAnUnlabelledImageSharedWithAnotherStack(t *testing.T) {
 		t.Fatalf("the other stack's tag %s: %q (%v), want the same image %q", otherTag, after, err, before)
 	}
 }
+
+// A built image that also carries a name of your own (a release tag)
+// cannot be deleted by id. The removal deletes the stack's own tag and
+// the other name keeps the image, whether Compose labelled the image (v5)
+// or not (v2).
+func TestRemovalLeavesAnImageYourOwnTagStillNames(t *testing.T) {
+	if _, err := os.Stat(socket); err != nil {
+		t.Skipf("no Docker socket at %s: %v", socket, err)
+	}
+	randID := randomHex(t, 4)
+	it := "devlease-it-" + randID
+	itTag, releaseTag := it+"-web:latest", "devlease-release-"+randID+"/web:1"
+	dir := filepath.Join(t.TempDir(), "it")
+	composeProject(t, dir)
+	compose(t, dir, it, "up", "-d", "--build")
+	t.Cleanup(func() {
+		compose(t, dir, it, "down", "-v", "--rmi", "local", "--remove-orphans")
+		exec.Command("docker", "image", "rm", releaseTag).Run()
+	})
+	if out, err := exec.Command("docker", "tag", itTag, releaseTag).CombinedOutput(); err != nil {
+		t.Fatalf("docker tag: %v\n%s", err, out)
+	}
+	idOf := func(tag string) (string, error) {
+		out, err := exec.Command("docker", "image", "inspect", "--format", "{{.Id}}", tag).CombinedOutput()
+		return strings.TrimSpace(string(out)), err
+	}
+	before, err := idOf(itTag)
+	if err != nil {
+		t.Fatalf("inspecting %s: %v\n%s", itTag, err, before)
+	}
+
+	cli := docker.New(socket)
+	st := lease.Store{Path: filepath.Join(t.TempDir(), "leases.json")}
+	cfg := reaper.Config{
+		Patterns:    []string{pattern},
+		Own:         "dev-lease",
+		DefaultTTL:  time.Hour,
+		RemoveAfter: time.Hour,
+		StopTimeout: 5 * time.Second,
+		Log:         os.Stdout,
+	}
+	ctx := context.Background()
+	if _, err := reaper.Pass(ctx, cli, st, cfg); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	expireLease(t, st, it)
+	if _, err := reaper.Pass(ctx, cli, st, cfg); err != nil {
+		t.Fatalf("stop pass: %v", err)
+	}
+	if err := st.Update(func(m map[string]lease.Lease) error {
+		l := m[it]
+		l.StoppedAt = time.Now().UTC().Add(-2 * cfg.RemoveAfter)
+		m[it] = l
+		return nil
+	}); err != nil {
+		t.Fatalf("backdating the stopped time: %v", err)
+	}
+	if _, err := reaper.Pass(ctx, cli, st, cfg); err != nil {
+		t.Fatalf("removal pass: %v", err)
+	}
+
+	if out, err := idOf(itTag); err == nil {
+		t.Fatalf("the stack's tag %s is still there: %s", itTag, out)
+	}
+	if after, err := idOf(releaseTag); err != nil || after != before {
+		t.Fatalf("the release tag %s: %q (%v), want the same image %q", releaseTag, after, err, before)
+	}
+}

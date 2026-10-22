@@ -594,6 +594,24 @@ func (c *Client) RemoveVolume(ctx context.Context, name string) error {
 	return err
 }
 
+// ImageID returns the id of the image an id or a repository tag names
+// now (GET /images/<ref>/json).
+func (c *Client) ImageID(ctx context.Context, ref string) (string, error) {
+	body, err := c.do(ctx, http.MethodGet, "/images/"+url.PathEscape(ref)+"/json")
+	if err != nil {
+		return "", err
+	}
+	var v struct {
+		Id string `json:"Id"`
+	}
+	if err := json.Unmarshal(body, &v); err != nil {
+		return "", err
+	}
+	// An answer without an id never matches a listed id, so a removal
+	// skips the tag.
+	return v.Id, nil
+}
+
 // RemoveImage removes one image by id, or one repository tag of an image
 // by its name: the daemon untags an image that has other tags, and
 // removes the image with its last tag.

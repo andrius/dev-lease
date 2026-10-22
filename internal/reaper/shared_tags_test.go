@@ -272,3 +272,127 @@ func TestRemovalKeepsTheImageAKeptContainerRunsFromWhenNoTagWouldRemain(t *testi
 		t.Fatalf("remove-image lines = %q, want one skip for the kept container", results)
 	}
 }
+
+// armMoveBeforeTagCall makes the fake move tag to the image toID just
+// before the first request that names the tag is routed: after the
+// removal's listing, before its delete (or its check), the way a build
+// landing at that moment would move it.
+func (h *harness) armMoveBeforeTagCall(tag, toID string) {
+	moved := false
+	h.srv.OnRequest(func(method, path string) {
+		if !moved && strings.Contains(path, "/images/"+tag) {
+			h.srv.MoveTag(tag, toID)
+			moved = true
+		}
+	})
+}
+
+func TestRemovalChecksATagStillNamesTheListedImage(t *testing.T) {
+	t.Run("when the stack's tag moved to a fresh build after the listing, expect the fresh build untouched", func(t *testing.T) {
+		h := newHarness(t)
+		h.srv.AddContainerWithUses("c1", "myapp-web-1", map[string]string{
+			docker.ProjectLabel: "myapp", docker.ServiceLabel: "web",
+		}, "sha256:shared", nil, nil)
+		h.srv.AddLabels("image", "sha256:shared", "myapp-web:latest", nil)
+		h.srv.SetImageTags("sha256:shared", "myapp-web:latest", "unmanaged-web:latest")
+		h.srv.AddLabels("image", "sha256:fresh", "sha256:fresh", nil)
+		h.srv.SetImageTags("sha256:fresh")
+		h.extend("myapp", time.Hour, testNow)
+		h.pass(t)
+		h.cfg.Now = func() time.Time { return testNow.Add(2 * time.Hour) }
+		h.pass(t)
+		h.ageStopped(t)
+		h.armMoveBeforeTagCall("myapp-web:latest", "sha256:fresh")
+		h.pass(t) // the removal
+
+		if got := h.srv.ImageTags("sha256:fresh"); !slices.Equal(got, []string{"myapp-web:latest"}) {
+			t.Fatalf("the fresh build's tags = %v (present %v), want it untouched with [myapp-web:latest]", got, h.srv.Has("image", "sha256:fresh"))
+		}
+		if got := h.srv.ImageTags("sha256:shared"); !slices.Equal(got, []string{"unmanaged-web:latest"}) {
+			t.Fatalf("the listed image's tags = %v, want [unmanaged-web:latest]", got)
+		}
+		var results []string
+		for _, l := range h.logLines() {
+			if l["action"] == "remove-image" {
+				results = append(results, l["name"].(string)+" "+l["result"].(string))
+			}
+		}
+		if !slices.Equal(results, []string{"myapp-web:latest skipped: the tag names another image since the listing"}) {
+			t.Fatalf("remove-image lines = %q, want one skip for the moved tag", results)
+		}
+	})
+
+	t.Run("when the image has one tag, expect it deleted by id", func(t *testing.T) {
+		h := newHarness(t)
+		h.srv.AddContainerWithUses("c1", "myapp-web-1", map[string]string{
+			docker.ProjectLabel: "myapp", docker.ServiceLabel: "web",
+		}, "sha256:one", nil, nil)
+		h.srv.AddLabels("image", "sha256:one", "myapp-web:latest", nil)
+		h.extend("myapp", time.Hour, testNow)
+		h.pass(t)
+		h.cfg.Now = func() time.Time { return testNow.Add(2 * time.Hour) }
+		h.pass(t)
+		h.ageStopped(t)
+		h.pass(t)
+
+		if h.srv.Has("image", "sha256:one") {
+			t.Fatal("the image survived the removal")
+		}
+		var deletes []string
+		for _, c := range h.srv.Calls() {
+			if c.Method == "DELETE" && strings.Contains(c.Path, "/images/") {
+				deletes = append(deletes, c.Path[strings.Index(c.Path, "/images/")+len("/images/"):])
+			}
+		}
+		if !slices.Equal(deletes, []string{"sha256:one"}) {
+			t.Fatalf("image deletes = %v, want exactly [sha256:one]: a one-tag image goes by id", deletes)
+		}
+	})
+}
+
+// A labelled image (Compose v5) with more than one tag cannot be deleted by
+// id either: the removal deletes the stack's own tags, and a tag that is
+// not the stack's keeps the image.
+func TestRemovalOfALabelledImageWithSeveralTags(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		tags     []string
+		wantLeft []string // nil: the image is gone
+		wantPlan []string
+	}{
+		{"when one tag is not the stack's, expect it to keep the image", []string{"myapp-web:latest", "myorg/web:release"}, []string{"myorg/web:release"}, []string{"myapp-web:latest"}},
+		{"when every tag is the stack's, expect the image gone", []string{"myapp-web:latest", "myapp-web:v2"}, nil, []string{"myapp-web:latest", "myapp-web:v2"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.srv.AddContainerWithUses("c1", "myapp-web-1", map[string]string{
+				docker.ProjectLabel: "myapp", docker.ServiceLabel: "web",
+			}, "sha256:img", nil, nil)
+			h.srv.AddLabels("image", "sha256:img", tc.tags[0], map[string]string{
+				docker.ProjectLabel: "myapp", docker.ServiceLabel: "web",
+			})
+			h.srv.SetImageTags("sha256:img", tc.tags...)
+			h.extend("myapp", time.Hour, testNow)
+			h.pass(t)
+			h.cfg.Now = func() time.Time { return testNow.Add(2 * time.Hour) }
+			h.pass(t)
+			h.ageStopped(t)
+			plan := h.planNow(t, "myapp")
+			h.pass(t)
+
+			if tc.wantLeft == nil {
+				if h.srv.Has("image", "sha256:img") {
+					t.Fatalf("the image survived with tags %v", h.srv.ImageTags("sha256:img"))
+				}
+			} else if got := h.srv.ImageTags("sha256:img"); !slices.Equal(got, tc.wantLeft) {
+				t.Fatalf("tags left = %v (present %v), want %v", got, h.srv.Has("image", "sha256:img"), tc.wantLeft)
+			}
+			if !slices.Equal(plan.Images, tc.wantPlan) {
+				t.Fatalf("plan images = %v, want %v", plan.Images, tc.wantPlan)
+			}
+			if removed := removedImageNames(h.logLines()); !slices.Equal(removed, tc.wantPlan) {
+				t.Fatalf("remove-image ok lines = %v, want the plan's %v", removed, tc.wantPlan)
+			}
+		})
+	}
+}

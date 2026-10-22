@@ -181,6 +181,21 @@ func (s *Server) SetImageTags(id string, tags ...string) {
 	s.images[id].tags = append([]string{}, tags...)
 }
 
+// MoveTag moves a repository tag to the image toID, like a build or a
+// docker tag that names a new image with an existing tag: the image that
+// had the tag loses it (and keeps its other tags).
+func (s *Server) MoveTag(tag, toID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, o := range s.images {
+		if tags := tagsOf(o); slices.Contains(tags, tag) {
+			o.tags = slices.DeleteFunc(tags, func(t string) bool { return t == tag })
+		}
+	}
+	to := s.images[toID]
+	to.tags = append(tagsOf(to), tag)
+}
+
 // ImageTags returns the repository tags an image has now.
 func (s *Server) ImageTags(id string) []string {
 	s.mu.Lock()
@@ -481,6 +496,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) int {
 			return s.listVolumes(w, r)
 		case kind == "images" && op == "":
 			return s.list(w, s.images, r, "image")
+		case kind == "images" && op == "json":
+			return s.inspectImage(w, id)
 		}
 	case http.MethodPost:
 		if kind == "containers" && op == "stop" {
@@ -757,6 +774,24 @@ func (s *Server) deleteImage(w http.ResponseWriter, ref string) int {
 	}
 	writeJSON(w, http.StatusOK, []map[string]string{{"Untagged": ref}, {"Deleted": o.id}})
 	return http.StatusOK
+}
+
+// inspectImage answers GET /images/<ref>/json with the id of the image an
+// id or a repository tag names now.
+func (s *Server) inspectImage(w http.ResponseWriter, ref string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if o, ok := s.images[ref]; ok {
+		writeJSON(w, http.StatusOK, map[string]any{"Id": o.id, "RepoTags": tagsOf(o)})
+		return http.StatusOK
+	}
+	for _, o := range s.images {
+		if slices.Contains(tagsOf(o), ref) {
+			writeJSON(w, http.StatusOK, map[string]any{"Id": o.id, "RepoTags": tagsOf(o)})
+			return http.StatusOK
+		}
+	}
+	return notFound(w)
 }
 
 func (s *Server) delete(w http.ResponseWriter, r *http.Request, kind, id string) int {

@@ -105,16 +105,18 @@ project included, is never stopped or removed (one exception, the image
 name below). A project's objects are found by the Compose label
 `com.docker.compose.project`.
 
-Its own images are the images Compose built for it: with the project
-label, the ones its containers ran from and the ones tagged
+Its own images are the images Compose built for it: with the project label,
+the ones its containers ran from and the ones tagged
 `<project>-<service>:<tag>`; without the project label (Compose v2 builds
 them that way), the ones named exactly `<project>-<service>` for one of the
 stack's own services. dev-lease records a stack's services at every sweep,
 so this still works after `docker compose down`, and such an image keeps a
-stopped stack listed until it is removed. An unlabelled image is removed
-tag by tag: identical builds share one image, Docker deletes it only with
-its last tag, so an image another stack also tagged stays for that stack.
-Pulled images such as `postgres:16-alpine` never match and are never
+stopped stack listed until it is removed. An image with one tag is removed
+by id. An image with several tags (identical builds share one image, and
+you may have tagged it yourself) loses only the stack's own
+`<project>-<service>` tags, each checked to still name that image right
+before its delete; another stack's tag or a name of your own keeps the
+image. Pulled images such as `postgres:16-alpine` never match and are never
 removed, and Docker itself refuses to delete an image another container
 uses. Compose can give two stacks the same image name: service `feat-web`
 of `myapp` and service `web` of `myapp-feat` both build `myapp-feat-web`,

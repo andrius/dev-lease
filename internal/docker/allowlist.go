@@ -73,6 +73,9 @@ func allowed(method, path string) bool {
 			return only("filters")
 		case len(parts) == 2 && parts[0] == "images" && parts[1] == "json":
 			return only("filters")
+		case len(parts) == 3 && parts[0] == "images" && parts[2] == "json":
+			// One image by id or tag: which image a tag names right now.
+			return only()
 		}
 	case "POST":
 		if len(parts) == 3 && parts[0] == "containers" && parts[2] == "stop" {

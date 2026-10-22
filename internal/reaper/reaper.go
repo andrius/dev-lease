@@ -982,8 +982,9 @@ func removeProject(ctx context.Context, cli *docker.Client, st lease.Store, proj
 	// Images: the removal lists them unfiltered, so the project's own
 	// unlabelled built images (Compose v2 builds images without labels)
 	// are in view too, and the image rule (ImageScope.Step) decides what
-	// of each is this removal's: an image carrying the project's label is
-	// deleted by id, an unlabelled one tag by tag, the services being the
+	// of each is this removal's: an image with one tag is deleted by id,
+	// one with several tags loses the stack's own tags, each checked to
+	// still name the listed image right before its delete, the services being the
 	// service labels of the containers in this listing or, when no
 	// container is left, the services the lease recorded. What stays for
 	// a kept service or container, and the project's images that stay for
@@ -1014,6 +1015,22 @@ func removeProject(ctx context.Context, cli *docker.Client, st lease.Store, proj
 			actSkip(log, via, now(), project, "remove-image", i.ID, i.Name, step.Reason)
 		}
 		for _, r := range step.Remove {
+			if r.Expect != "" {
+				// A delete by tag hits whatever the tag names at that
+				// moment: a build may have moved it since the listing. The
+				// check narrows that window to the two calls; Docker has no
+				// delete that names both a tag and an id.
+				cur, err := cli.ImageID(ctx, r.Ref)
+				if err != nil {
+					removeOne("remove-image", i.ID, r.Name, "daemon refused the check", err)
+					continue
+				}
+				if cur != r.Expect {
+					actSkip(log, via, now(), project, "remove-image", i.ID, r.Name, "the tag names another image since the listing")
+					skipped = append(skipped, r.Name)
+					continue
+				}
+			}
 			removeOne("remove-image", i.ID, r.Name, "daemon refused: in use", cli.RemoveImage(ctx, r.Ref))
 		}
 	}

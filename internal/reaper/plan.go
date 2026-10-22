@@ -1,6 +1,7 @@
 package reaper
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/andrius/dev-lease/internal/docker"
@@ -86,8 +87,11 @@ func NewImageScope(project string, conts []docker.Object, recorded []string) Ima
 	return sc
 }
 
-// ImageRef is one DELETE /images/<Ref> of a removal, reported under Name.
-type ImageRef struct{ Ref, Name string }
+// ImageRef is one delete of a removal, DELETE /images/<Ref>, reported
+// under Name. Expect is set for a delete by tag: the id of the image the
+// tag must still name right before the delete, since a tag can move to
+// another image after the listing. It is empty for a delete by id.
+type ImageRef struct{ Ref, Name, Expect string }
 
 // ImageStep is what the project's removal does with one image.
 type ImageStep struct {
@@ -105,17 +109,22 @@ type ImageStep struct {
 // Step is the image rule, the one the sweep's removal, RemoveNow,
 // PlanFor, the detail page, status and the presence check share.
 //
-// An image carrying the project's label is deleted by id when a
+// An image with one tag (or none) is deleted by id, which names exactly
+// the listed image. Docker refuses to delete an image with several tags
+// by id, so such an image loses the stack's own tags one by one, each
+// checked right before its delete to still name the listed image (a
+// build can move a tag in between); any other tag keeps the image.
+//
+// An image carrying the project's label is the project's when a
 // container of the project ran from it or one of its tags has the
 // <project>-<service> shape for the image's own service label.
 //
 // An image carrying no project label (Compose v2 builds images without
-// labels) is deleted tag by tag: each tag whose repository is exactly
-// <project>-<service> for one of the project's services. Identical
-// builds share one image id, across services and projects, and Docker
-// refuses to delete such an image by id; deleting a tag only untags it
-// while other tags remain, and deletes the image with its last tag
-// unless a container uses it. The tags of a kept service stay, and so
+// labels) is the project's through its tags: each tag whose repository is
+// exactly <project>-<service> for one of the project's services.
+// Identical builds share one image id, across services and projects;
+// deleting a tag only untags it while other tags remain, and deletes the
+// image with its last tag unless a container uses it. The tags of a kept service stay, and so
 // does the whole image when a kept container runs from it and deleting
 // the stack's tags would take its last tag.
 //
@@ -128,24 +137,28 @@ func (sc ImageScope) Step(i docker.Object) ImageStep {
 		switch {
 		case sc.KeptImages[i.ID]:
 			return ImageStep{Kept: []string{i.Name}, Reason: "a kept container of the project runs from it"}
-		case sc.Used[i.ID] || docker.ImageTagMatches(sc.Project, i):
-			return ImageStep{Remove: []ImageRef{{Ref: i.ID, Name: i.Name}}}
-		case i.Untagged:
-			return ImageStep{Reason: "untagged leftover of an earlier build"}
-		default:
-			return ImageStep{Reason: "no container of the project runs from it and its tags do not carry the project's service name"}
-		}
-	case "":
-		var st ImageStep
-		for _, tag := range i.RepoTags {
-			svc, ok := docker.TagService(sc.Project, sc.Services, tag)
-			switch {
-			case !ok:
-			case sc.KeptServices[svc]:
-				st.Kept = append(st.Kept, tag)
-			default:
-				st.Remove = append(st.Remove, ImageRef{Ref: tag, Name: tag})
+		case !sc.Used[i.ID] && !docker.ImageTagMatches(sc.Project, i):
+			if i.Untagged {
+				return ImageStep{Reason: "untagged leftover of an earlier build"}
 			}
+			return ImageStep{Reason: "no container of the project runs from it and its tags do not carry the project's service name"}
+		case len(i.RepoTags) <= 1:
+			return ImageStep{Remove: []ImageRef{{Ref: i.ID, Name: i.Name}}}
+		}
+		st := sc.ownTags(i)
+		switch {
+		case len(st.Kept) > 0:
+			st.Reason = "built for a kept service of the project"
+		case len(st.Remove) == 0:
+			st.Reason = "its tags are not the stack's own <project>-<service> names"
+		}
+		return st
+	case "":
+		st := sc.ownTags(i)
+		if len(st.Remove) == 1 && len(i.RepoTags) == 1 {
+			// The stack's tag is the image's only one: deleted by id, which
+			// names exactly the listed image.
+			st.Remove[0] = ImageRef{Ref: i.ID, Name: st.Remove[0].Name}
 		}
 		switch {
 		case len(st.Kept) > 0:
@@ -169,6 +182,29 @@ func (sc ImageScope) Step(i docker.Object) ImageStep {
 		return st
 	}
 	return ImageStep{}
+}
+
+// ownTags splits the image's tags that are the stack's own, repository
+// exactly <project>-<service> for one of the project's services (or the
+// image's own service label): a kept service's tags are Kept, every other
+// one is a delete by tag that expects the tag to still name this image.
+func (sc ImageScope) ownTags(i docker.Object) ImageStep {
+	svcs := sc.Services
+	if s := i.Labels[docker.ServiceLabel]; s != "" {
+		svcs = append(slices.Clone(svcs), s)
+	}
+	var st ImageStep
+	for _, tag := range i.RepoTags {
+		svc, ok := docker.TagService(sc.Project, svcs, tag)
+		switch {
+		case !ok:
+		case sc.KeptServices[svc]:
+			st.Kept = append(st.Kept, tag)
+		default:
+			st.Remove = append(st.Remove, ImageRef{Ref: tag, Name: tag, Expect: i.ID})
+		}
+	}
+	return st
 }
 
 // PlanFor computes the plan from listings taken at one moment, applying

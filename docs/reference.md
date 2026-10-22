@@ -219,17 +219,21 @@ so a state file from a newer format is never misread.
       containers, or from `services` in the lease when none is left). An
       image labelled for another project never matches, and pulled images
       such as `postgres:16-alpine` never match either. Images are deleted
-      without `force`. A project-labelled image is deleted by id: Docker
-      refuses an image another container uses, and an image a kept
-      container runs from stays. An unlabelled image is deleted tag by tag,
-      one `DELETE /images/<project>-<service>:<tag>` per matching tag:
-      identical builds share one image id, across services and projects,
-      and Docker refuses to delete such an image by id, while deleting a
-      tag only untags it as long as other tags remain and deletes the image
-      with its last tag (refused while a container uses it). The tags of a
-      kept service stay, and so does the whole image when a kept container
-      runs from it and its last tag would go. An unlabelled image alone never makes a project
-      without a lease present.
+      without `force`, and an image a kept container runs from stays. An
+      image with one tag (or none) is deleted by id, which names exactly
+      the listed image; Docker refuses one another container uses. An
+      image with several tags cannot be deleted by id (identical builds
+      share one image id, across services and projects, and a name of
+      your own counts too): it loses the stack's own tags, one
+      `DELETE /images/<project>-<service>:<tag>` each, and each tag is
+      first checked to still name the listed image
+      (`GET /images/<tag>/json`; a tag a build moved since the listing is
+      skipped and logged). Deleting a tag only untags the image while
+      other tags remain, and deletes it with its last tag (refused while
+      a container uses it). The tags of a kept service stay, and so does
+      the whole image when a kept container runs from it and its last tag
+      would go. An unlabelled image alone never makes a project without a
+      lease present.
 
    Whatever the outcome, the lease is deleted at the end. If objects are
    left, the project is present at the next sweep and is treated as a new
