@@ -118,7 +118,7 @@ jobs:
           # foreign Host gets 403. Grep the link, not the bare name: the
           # name alone appears in log lines and headers too, so only the
           # link proves the listing rendered.
-          curl -fsS -H 'Host: 127.0.0.1' http://127.0.0.1:8410/ | grep -q 'href="/stacks/"'"$DL_TARGET"'"'
+          curl -fsS -H 'Host: 127.0.0.1' http://127.0.0.1:8410/ | grep -q "href=\"/stacks/$DL_TARGET\""
           code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example' http://127.0.0.1:8410/)
           if [ "$code" != 403 ]; then
             echo "dashboard: a foreign Host got $code, want 403" >&2
