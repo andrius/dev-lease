@@ -115,6 +115,7 @@ neither lock.
     "myapp-a": {
       "project": "myapp-a",
       "label_remove_after": 0,
+      "services": ["db", "web"],
       "holders": [
         {"name": "agent", "extended_at": "2026-10-21T08:31:00Z", "expires": "2026-10-21T10:31:00Z", "ttl": 7200000000000},
         {"name": "alice", "extended_at": "2026-10-21T08:20:00Z", "expires": "2026-10-21T10:20:00Z", "ttl": 7200000000000}
@@ -141,8 +142,11 @@ stopped (`remove_after`) and where it came from (`remove_after_from`:
 `label` or `serve`). `label_remove_after` is the delay the project's
 `dev-lease.remove-after` labels gave the last time a sweep saw its
 containers (absent when they carried none); it outlives the containers, so
-it still applies after `docker compose down`. The header carries serve's
-patterns and settings, so the client commands know them.
+it still applies after `docker compose down`. `services` lists the
+project's `com.docker.compose.service` labels from the same sweep, so its
+unlabelled built images are still recognised once the containers are gone.
+The header carries serve's patterns and settings, so the client commands
+know them.
 
 | `state` | Meaning | What a sweep does | `extend` |
 | --- | --- | --- | --- |
@@ -208,10 +212,16 @@ so a state file from a newer format is never misread.
       project ran from and those with a tag `<project>-<service>:<tag>`
       (the whole repository, registry and path included, equal to the
       project name, a dash and the image's own
-      `com.docker.compose.service` label). Unlabelled images such as
-      `postgres:16-alpine` are never listed, so never removed. Images are
-      deleted without `force`: Docker refuses an image another container
-      uses.
+      `com.docker.compose.service` label); of the images without a
+      `com.docker.compose.project` label (Compose v2 builds them that
+      way), those with a tag whose whole repository is
+      `<project>-<service>` for one of the project's services (from its
+      containers, or from `services` in the lease when none is left). An
+      image labelled for another project never matches, and pulled images
+      such as `postgres:16-alpine` never match either. Images are deleted
+      without `force`: Docker refuses an image another container uses, and
+      an image a kept container runs from stays. An unlabelled image alone
+      does not make a project present.
 
    Whatever the outcome, the lease is deleted at the end. If objects are
    left, the project is present at the next sweep and is treated as a new

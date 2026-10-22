@@ -15,7 +15,15 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Two runners on purpose: ubuntu-24.04 ships Compose v2, whose built
+    # images carry no labels, and ubuntu-26.04 ships Compose v5, which
+    # labels them. dev-lease must remove a stack's built images on both.
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -23,6 +31,10 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.27.x"
+      - name: docker and compose versions
+        run: |
+          docker version --format 'docker {{.Server.Version}}'
+          docker compose version
       - name: vet
         run: go vet ./...
       - name: unit tests with the race detector
@@ -126,7 +138,7 @@ jobs:
   # manages only the two demo stacks, and its own project name does not
   # match the managed pattern.
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: test
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

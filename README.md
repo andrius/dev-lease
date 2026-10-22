@@ -62,12 +62,16 @@ it over [MCP](#mcp-for-ai-agents).
 **What belongs to a stack.** Only projects whose Compose project name
 matches your `--projects` patterns are touched; everything else on the
 machine, dev-lease's own project included, is never stopped or removed. A project's objects are found by the Compose label
-`com.docker.compose.project`. Its own images are the project-labelled
-images its containers ran from and the images tagged
-`<project>-<service>:<tag>`, the name Compose gives a built image. Pulled
-images such as `postgres:16-alpine` carry no project label and are never
-removed, and Docker itself refuses to delete an image another container
-uses. An object Docker refuses or fails to remove is logged and left in
+`com.docker.compose.project`. Its own images are the images Compose built
+for it: with the project label, the ones its containers ran from and the
+ones tagged `<project>-<service>:<tag>`; without any label (Compose v2 builds
+them that way), the ones named exactly `<project>-<service>` for one of the
+stack's own services. dev-lease records a stack's services at every sweep, so
+this still works after `docker compose down`. Pulled images such as
+`postgres:16-alpine` never match and are never removed, and Docker itself
+refuses to delete an image another container uses. (Compose can give two
+stacks the same image name: service `feat-web` of `myapp` and service `web`
+of `myapp-feat` both build `myapp-feat-web`.) An object Docker refuses or fails to remove is logged and left in
 place; if that leaves the stack present, it is treated as a new one: it gets
 the default lease, and is stopped and later removed again.
 
@@ -104,6 +108,22 @@ happens, put `dev-lease.keep` on the volume. Docker also copies an image's
 labels to its containers, so an image you build `FROM` can carry these
 labels too. `dev-lease.keep` works on services and volumes, not on
 networks.
+
+**Check what dev-lease sees.** `dl status` lists, per stack, the containers,
+networks, volumes and images it counts as the stack's, and the dashboard's
+stack page shows which images go with the stack and which stay. To read the
+labels yourself:
+
+```bash
+docker inspect myapp-feat-login-web-1 --format '{{json .Config.Labels}}'      # dev-lease.keep, dev-lease.remove-after on a service
+docker volume inspect myapp-feat-login_pgdata --format '{{json .Labels}}'      # dev-lease.keep on a volume
+docker image inspect myapp-feat-login-web --format '{{json .Config.Labels}}'   # does Compose label your built images?
+docker compose version
+```
+
+Compose v5 labels the images it builds with `com.docker.compose.project` and
+`com.docker.compose.service`; Compose v2 leaves them without labels (`null`).
+dev-lease removes a stack's built images either way.
 
 ## Quick start
 
