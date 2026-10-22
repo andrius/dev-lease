@@ -36,26 +36,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        # The tag name goes through the environment, never into the script
-        # text: a tag can contain shell syntax. It must match the release
-        # semver shape, and :latest is moved only when the tag is the
-        # highest non-pre-release tag.
+        # Tags, labels and annotations come from one script, which CI runs
+        # too (the image metadata step there). The tag name goes through
+        # the environment, never into the script text: a tag can contain
+        # shell syntax; the script checks its semver shape first.
         env:
           REF: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
         run: |
-          set -e
-          echo "$REF" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' || {
-            echo "ref name $REF does not match ^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?\$" >&2
-            exit 1
-          }
-          TAGS="ghcr.io/andrius/dev-lease:$REF"
-          HIGHEST="$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)"
-          if [ -z "$HIGHEST" ] || [ "$HIGHEST" != "$REF" ]; then
-            echo "tag $REF is not the highest non-pre-release tag ($HIGHEST); :latest stays"
-          else
-            TAGS="$TAGS,ghcr.io/andrius/dev-lease:latest"
-          fi
-          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          OUT_DIR="$(mktemp -d)"
+          export OUT_DIR
+          .github/scripts/image-meta.sh
+          {
+            echo "tags=$(cat "$OUT_DIR/tags")"
+            echo "labels<<EOF_META"
+            cat "$OUT_DIR/labels"
+            echo "EOF_META"
+            echo "annotations<<EOF_META"
+            cat "$OUT_DIR/annotations"
+            echo "EOF_META"
+          } >> "$GITHUB_OUTPUT"
       - id: push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
@@ -63,6 +64,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           build-args: |
             VERSION=${{ github.ref_name }}
       - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0

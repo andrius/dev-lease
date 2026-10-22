@@ -21,9 +21,14 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
 RUN mkdir -p /data && chown 65532:65532 /data
 
 FROM gcr.io/distroless/static-debian12@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2
+# The release reads these values (.github/scripts/image-meta.sh) and sets
+# them as annotations on the index and the platform manifests too, with
+# version, revision and created; a value must not contain a comma.
 LABEL org.opencontainers.image.title="dev-lease" \
-      org.opencontainers.image.description="TTL leases for local Docker Compose stacks" \
+      org.opencontainers.image.description="Stops the Docker Compose stacks nobody uses and removes them after a grace period. Leases per stack with a web dashboard and an MCP server for AI agents." \
+      org.opencontainers.image.url="https://github.com/andrius/dev-lease" \
       org.opencontainers.image.source="https://github.com/andrius/dev-lease" \
+      org.opencontainers.image.documentation="https://github.com/andrius/dev-lease#readme" \
       org.opencontainers.image.licenses="MIT"
 # serve must start as root: it reads the Docker socket's group and drops to
 # uid 65532 keeping only that group, before any Docker call.

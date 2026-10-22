@@ -51,3 +51,6 @@ After the tag push has built the image:
    `dev-lease v0.1.0`.
 4. `gh attestation verify oci://ghcr.io/andrius/dev-lease:v0.1.0 --owner andrius`
    passes (gh 2.49 or later).
+5. The package page on GitHub shows the description, and
+   `docker buildx imagetools inspect ghcr.io/andrius/dev-lease:v0.1.0 --format '{{json .Manifest.Annotations}}'`
+   lists the description, version, revision and source annotations.

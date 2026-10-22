@@ -75,6 +75,25 @@ jobs:
           find examples -name '*.json' -exec sh -ec '
             for f do jq empty "$f" || exit 1; done
           ' sh {} +
+      - name: the release image metadata reaches the index, the manifests and the configs
+        # The release's own script and flags, with a test tag, built for both
+        # platforms into an OCI layout instead of being pushed. GitHub's
+        # package page reads the description from the index annotation.
+        if: matrix.os == 'ubuntu-26.04'
+        run: |
+          set -euo pipefail
+          for f in .github/scripts/*.sh; do bash -n "$f"; shellcheck "$f"; done
+          OUT_DIR="$(mktemp -d)"
+          export OUT_DIR
+          REF=v0.0.0-ci SHA="$GITHUB_SHA" .github/scripts/image-meta.sh
+          docker buildx create --name devlease-meta --driver docker-container --use >/dev/null
+          trap 'docker buildx rm devlease-meta >/dev/null 2>&1 || true' EXIT
+          args=()
+          while IFS= read -r a; do args+=(--annotation "$a"); done < "$OUT_DIR/annotations"
+          while IFS= read -r l; do args+=(--label "$l"); done < "$OUT_DIR/labels"
+          docker buildx build --platform linux/amd64,linux/arm64 "${args[@]}" \
+            --build-arg VERSION=v0.0.0-ci --output "type=oci,dest=$RUNNER_TEMP/image.tar" .
+          .github/scripts/check-image-meta.sh "$RUNNER_TEMP/image.tar" "$OUT_DIR"
       - name: image builds and answers --help
         run: |
           docker build -t dev-lease:ci .
