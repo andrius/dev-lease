@@ -10,7 +10,7 @@ import (
 
 // privdrop drops the root privileges serve starts with: the group of the
 // Docker socket is kept (that group owns the socket) and the uid becomes
-// 65532 (distroless nonroot). It is a no-op when serve does not run as root.
+// 65532 (the common nonroot uid). It is a no-op when serve does not run as root.
 // It must run before any Docker call.
 func privdrop(socketPath string) error {
 	if os.Geteuid() != 0 {

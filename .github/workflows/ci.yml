@@ -117,7 +117,7 @@ jobs:
           docker compose -p "$DL_OWN" -f examples/basic/compose.yml up -d --wait
           docker compose -p "$DL_TARGET" -f "$target" up -d --wait
           # The documented one-liner must work from the shipped image: the
-          # binary sits at /usr/local/bin on the distroless PATH. Retry
+          # binary sits at /usr/local/bin, the image's PATH. Retry
           # while serve takes its first pass and grants the default lease.
           found=0
           for _ in $(seq 1 30); do
