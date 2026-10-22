@@ -101,20 +101,29 @@ with `0` records `0` and stays until someone starts or extends it.
 
 Only projects whose Compose project name matches your `--projects`
 patterns are touched; everything else on the machine, dev-lease's own
-project included, is never stopped or removed. A project's objects are
-found by the Compose label
-`com.docker.compose.project`. Its own images are the images Compose built
-for it: with the project label, the ones its containers ran from and the
-ones tagged `<project>-<service>:<tag>`; without any label (Compose v2 builds
+project included, is never stopped or removed (one exception, the image
+name below). A project's objects are found by the Compose label
+`com.docker.compose.project`.
+
+Its own images are the images Compose built for it: with the project
+label, the ones its containers ran from and the ones tagged
+`<project>-<service>:<tag>`; without the project label (Compose v2 builds
 them that way), the ones named exactly `<project>-<service>` for one of the
-stack's own services. dev-lease records a stack's services at every sweep, so
-this still works after `docker compose down`. Pulled images such as
-`postgres:16-alpine` never match and are never removed, and Docker itself
-refuses to delete an image another container uses. (Compose can give two
-stacks the same image name: service `feat-web` of `myapp` and service `web`
-of `myapp-feat` both build `myapp-feat-web`.) An object Docker refuses or fails to remove is logged and left in
-place; if that leaves the stack present, it is treated as a new one: it gets
-the default lease, and is stopped and later removed again.
+stack's own services. dev-lease records a stack's services at every sweep,
+so this still works after `docker compose down`, and such an image keeps a
+stopped stack listed until it is removed. An unlabelled image is removed
+tag by tag: identical builds share one image, Docker deletes it only with
+its last tag, so an image another stack also tagged stays for that stack.
+Pulled images such as `postgres:16-alpine` never match and are never
+removed, and Docker itself refuses to delete an image another container
+uses. Compose can give two stacks the same image name: service `feat-web`
+of `myapp` and service `web` of `myapp-feat` both build `myapp-feat-web`,
+so removing `myapp` removes that image too, even when `myapp-feat` is not
+managed.
+
+An object Docker refuses or fails to remove is logged and left in place;
+if that leaves the stack present, it is treated as a new one: it gets the
+default lease, and is stopped and later removed again.
 
 ### Labels
 
@@ -167,8 +176,9 @@ docker compose version
 ```
 
 Compose v5 labels the images it builds with `com.docker.compose.project` and
-`com.docker.compose.service`; Compose v2 leaves them without labels (`null`).
-dev-lease removes a stack's built images either way.
+`com.docker.compose.service`; Compose v2 leaves them without these labels
+(`null`, or only the labels of the base image). dev-lease removes a stack's
+built images either way.
 
 ## Quick start
 

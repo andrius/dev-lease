@@ -152,7 +152,7 @@ know them.
 | --- | --- | --- | --- |
 | absent | A lease, live or expired. | Nothing while a holder is live; at expiry, stop. | Extends the claim. |
 | `stopping` | A stop is under way. | Found at the start of a sweep, it was left by a failed container listing or a serve that died: the lease goes back to what it was (`stopped` when it has a `stopped_at`, otherwise an expired lease that the same sweep stops again), with every field kept. | Refused, exit 3. |
-| `stopped` | Stopped at `stopped_at`. Its delay now: `0` (never) when the recorded delay or serve's current setting is 0; else a label's recorded value; else the longer of the recorded and the current setting. | Revive when one of its containers runs again; remove once the delay has passed; drop the lease when nothing of the project is left on the daemon. | A live lease again. |
+| `stopped` | Stopped at `stopped_at`. Its delay now: `0` (never) when the recorded delay or serve's current setting is 0; else a label's recorded value; else the longer of the recorded and the current setting. | Revive when one of its containers runs again; remove once the delay has passed; drop the lease when nothing of the project is left on the daemon (an unlabelled built image found through `services` counts). | A live lease again. |
 | `removing` | A removal is under way. | Found at the start of a sweep: the lease is deleted, and a project still present gets the default lease, which keeps `label_remove_after`. | Refused, exit 3. |
 | anything else | Written by another version. | Deleted only when the lease has expired; a live lease with an unknown state is left alone and logged. | Extends the claim. |
 
@@ -219,9 +219,16 @@ so a state file from a newer format is never misread.
       containers, or from `services` in the lease when none is left). An
       image labelled for another project never matches, and pulled images
       such as `postgres:16-alpine` never match either. Images are deleted
-      without `force`: Docker refuses an image another container uses, and
-      an image a kept container runs from stays. An unlabelled image alone
-      does not make a project present.
+      without `force`. A project-labelled image is deleted by id: Docker
+      refuses an image another container uses, and an image a kept
+      container runs from stays. An unlabelled image is deleted tag by tag,
+      one `DELETE /images/<project>-<service>:<tag>` per matching tag:
+      identical builds share one image id, across services and projects,
+      and Docker refuses to delete such an image by id, while deleting a
+      tag only untags it as long as other tags remain and deletes the image
+      with its last tag (refused while a container uses it). The tags of a
+      kept service stay. An unlabelled image alone never makes a project
+      without a lease present.
 
    Whatever the outcome, the lease is deleted at the end. If objects are
    left, the project is present at the next sweep and is treated as a new

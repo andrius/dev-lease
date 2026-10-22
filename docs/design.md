@@ -70,9 +70,12 @@ project's when a container of the project ran from it, or when it is tagged
 whole repository, so a registry image of the same name is not matched).
 Compose v2 builds images without any label, so an unlabelled image counts
 when its name is exactly `<project>-<service>` for one of the project's own
-services, which every sweep records in the lease. Pulled images never match
-and are never touched. Deletes run
-without `force`, so Docker itself protects an image another container uses.
+services, which every sweep records in the lease. Such an image is deleted
+by tag, not by id: identical builds share one image id across services and
+projects, Docker refuses to delete an image with several repositories by
+id, and deleting one tag leaves the image to the stacks whose tags remain.
+Pulled images never match and are never touched. Deletes run without
+`force`, so Docker itself protects an image another container uses.
 
 **Policy lives in the app's compose file.** `dev-lease.keep` on a service or
 a volume, and `dev-lease.remove-after` on a service, let a stack say what
