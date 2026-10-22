@@ -8,12 +8,16 @@ root="$(git rev-parse --show-toplevel)"
 # BUMP lets a mutation test point the checks at a changed copy.
 bump="${BUMP:-$root/.github/scripts/bump-docs-version.sh}"
 tmp="$(mktemp -d)"
-trap 'rm -rf -- "${tmp:?}"' EXIT
+trap 'cd / && rm -rf -- "${tmp:?}"' EXIT
 git -C "$root" archive HEAD | tar -x -C "$tmp"
 cd "$tmp"
 # Another version in the same file, not an image reference: it must stay.
 printf '\nNot an image: some-tool v2.38.2 and dev-lease v3.2.1.\n' >> README.md
 git init -q
+# git commit starts auto maintenance in the background (--detach); it can
+# still write into .git while the cleanup deletes the directory.
+git config maintenance.auto false
+git config gc.auto 0
 git add -A
 git -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit -qm base
 fail=0
