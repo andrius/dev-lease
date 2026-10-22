@@ -504,14 +504,21 @@ func Details(ctx context.Context, cli *docker.Client, st lease.Store, cfg reaper
 	l := leases[name]
 	svcs := reaper.ServicesOf(conts, l.Services)
 	for _, i := range imgs {
-		if p := i.Labels[docker.ProjectLabel]; p != "" && p != name {
+		p := i.Labels[docker.ProjectLabel]
+		if p != "" && p != name {
+			continue
+		}
+		removable := !keptImgs[i.ID] && reaper.ImageRemovable(i, name, svcs, used)
+		if p == "" && !removable && !used[i.ID] && !keptImgs[i.ID] {
+			// An unlabelled image the stack neither built nor runs from:
+			// some other image on the daemon, no part of this stack.
 			continue
 		}
 		nameOf := i.Name
 		if nameOf == "" {
 			nameOf = i.ID
 		}
-		if keptImgs[i.ID] || !reaper.ImageRemovable(i, name, svcs, used) {
+		if !removable {
 			d.KeptImages = append(d.KeptImages, nameOf)
 		} else {
 			d.RemovedImages = append(d.RemovedImages, nameOf)

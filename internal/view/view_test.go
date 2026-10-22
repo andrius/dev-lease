@@ -293,8 +293,10 @@ func TestDetailsUnlabelledBuiltImage(t *testing.T) {
 	if !sameStrings(d.RemovedImages, []string{"myapp-web:latest"}) {
 		t.Errorf("RemovedImages = %v, want the unlabelled built image", d.RemovedImages)
 	}
-	if !sameStrings(d.KeptImages, []string{"postgres:16-alpine"}) {
-		t.Errorf("KeptImages = %v, want only the pulled image", d.KeptImages)
+	// No container of the stack runs from postgres:16-alpine, so it is
+	// some other image on the daemon and the page does not list it.
+	if len(d.KeptImages) != 0 {
+		t.Errorf("KeptImages = %v, want none: nothing of the stack uses the pulled image", d.KeptImages)
 	}
 }
 
