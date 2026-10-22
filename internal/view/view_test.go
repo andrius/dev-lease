@@ -272,6 +272,32 @@ func TestDetailsContainersVolumesImages(t *testing.T) {
 	}
 }
 
+// The detail page's image split follows the same rule the removal does:
+// an unlabelled built image (Compose v2) tagged <project>-<service> is
+// listed for removal once a container names the service, a pulled image
+// stays.
+func TestDetailsUnlabelledBuiltImage(t *testing.T) {
+	h := newVH(t)
+	srv := h.srv
+	srv.AddContainerWithUses("c1", "web", map[string]string{
+		docker.ProjectLabel: "myapp", docker.ServiceLabel: "web",
+	}, "", nil, nil)
+	srv.AddLabels("image", "sha256:unlab", "myapp-web:latest", nil)
+	srv.AddLabels("image", "sha256:pg", "postgres:16-alpine", nil)
+	srv.Add("volume", "myapp_data", "myapp_data", "myapp")
+
+	d, err := Details(context.Background(), h.cli(), h.st, h.cfg, "myapp", "", 10, viewNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameStrings(d.RemovedImages, []string{"myapp-web:latest"}) {
+		t.Errorf("RemovedImages = %v, want the unlabelled built image", d.RemovedImages)
+	}
+	if !sameStrings(d.KeptImages, []string{"postgres:16-alpine"}) {
+		t.Errorf("KeptImages = %v, want only the pulled image", d.KeptImages)
+	}
+}
+
 // sameStrings reports whether the two slices hold the same strings in any
 // order.
 func sameStrings(a, b []string) bool {

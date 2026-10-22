@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -111,10 +112,15 @@ func PassWith(ctx context.Context, cli *docker.Client, st lease.Store, cfg Confi
 	// lease is expired; a live lease with an unknown state is left alone
 	// and logged, so an unknown mark never locks a live project and a
 	// foreign reader's mark is not wiped from a lease it still manages.
-	// inheritAfter carries a cleared lease's recorded label delay to the
-	// replacement lease the grant loop creates, so a stale removing mark
-	// cannot erase the label record its own stop read.
-	inheritAfter := map[string]*time.Duration{}
+	// inheritAfter carries a cleared lease's recorded label delay and
+	// recorded services to the replacement lease the grant loop creates,
+	// so a stale removing mark cannot erase the records its own stop
+	// read.
+	type inherit struct {
+		labelRemoveAfter *time.Duration
+		services         []string
+	}
+	inheritAfter := map[string]*inherit{}
 	for name, l := range leases {
 		if !Managed(name, cfg) {
 			continue
@@ -173,7 +179,7 @@ func PassWith(ctx context.Context, cli *docker.Client, st lease.Store, cfg Confi
 			// Drop the cleared entry from the snapshot too, so the grant
 			// loop below treats the project as lease-less.
 			delete(leases, name)
-			inheritAfter[name] = l.LabelRemoveAfter
+			inheritAfter[name] = &inherit{labelRemoveAfter: l.LabelRemoveAfter, services: l.Services}
 			act(log, via, now(), name, "clear-state", "", l.State, nil)
 		}
 	}
@@ -184,17 +190,22 @@ func PassWith(ctx context.Context, cli *docker.Client, st lease.Store, cfg Confi
 	// granted (logged as revived). A container whose stop failed also
 	// looks running here: it gets the default lease and the stop is
 	// retried when that expires.
-	grantDefault := func(name, action string, after *time.Duration) error {
+	grantDefault := func(name, action string, in *inherit) error {
 		// The snapshot may be stale: a concurrent extend can land while
 		// the pass lists projects, so the grant re-checks inside the
-		// lock. after is the label delay the replaced lease had recorded;
-		// every grant keeps the record.
+		// lock. in carries the records the replaced lease had; every
+		// grant keeps them.
+		var after *time.Duration
+		var services []string
+		if in != nil {
+			after, services = in.labelRemoveAfter, in.services
+		}
 		granted := false
 		if err := st.Update(func(m map[string]lease.Lease) error {
 			if _, ok := m[name]; ok {
 				return nil
 			}
-			l, err := lease.Extend(lease.Lease{Project: name, LabelRemoveAfter: after}, defaultHolder, cfg.DefaultTTL, now())
+			l, err := lease.Extend(lease.Lease{Project: name, LabelRemoveAfter: after, Services: services}, defaultHolder, cfg.DefaultTTL, now())
 			if err != nil {
 				return err
 			}
@@ -244,13 +255,14 @@ func PassWith(ctx context.Context, cli *docker.Client, st lease.Store, cfg Confi
 		}); err != nil {
 			return rep, fmt.Errorf("revive %s: %w", name, err)
 		}
-		// The replacement lease keeps the label delay the stopped lease
-		// had recorded: the revive must not erase what the sweep read
-		// while the containers were there, and the refresh below re-reads
-		// it from the labels when the containers still carry them.
+		// The replacement lease keeps the label delay and the services the
+		// stopped lease had recorded: the revive must not erase what the
+		// sweep read while the containers were there, and the refresh
+		// below re-reads them from the labels when the containers still
+		// carry them.
 		after := l.LabelRemoveAfter
 		delete(leases, name)
-		if err := grantDefault(name, "revive", after); err != nil {
+		if err := grantDefault(name, "revive", &inherit{labelRemoveAfter: after, services: l.Services}); err != nil {
 			return rep, err
 		}
 	}
@@ -271,10 +283,12 @@ func PassWith(ctx context.Context, cli *docker.Client, st lease.Store, cfg Confi
 	// read, so a pass with nothing to change never rewrites the state
 	// file. One store update covers every change.
 	type refreshChange struct {
-		label     *time.Duration
-		setLabel  bool
-		after     *time.Duration
-		afterFrom string
+		label       *time.Duration
+		setLabel    bool
+		after       *time.Duration
+		afterFrom   string
+		services    []string
+		setServices bool
 	}
 	labelNames := map[string]bool{}
 	for p := range projects {
@@ -309,6 +323,10 @@ func PassWith(ctx context.Context, cli *docker.Client, st lease.Store, cfg Confi
 		}
 		d, fromLabel := removeAfterFor(conts, cfg.RemoveAfter)
 		ch := refreshChange{}
+		svcs := ServicesOf(conts, nil)
+		if !has || !slices.Equal(l.Services, svcs) {
+			ch.services, ch.setServices = svcs, true
+		}
 		if fromLabel {
 			if !has || l.LabelRemoveAfter == nil || *l.LabelRemoveAfter != d {
 				ch.label, ch.setLabel = &d, true
@@ -329,7 +347,7 @@ func PassWith(ctx context.Context, cli *docker.Client, st lease.Store, cfg Confi
 				ch.after, ch.afterFrom = &merged, from
 			}
 		}
-		if ch.setLabel || ch.after != nil {
+		if ch.setLabel || ch.after != nil || ch.setServices {
 			changed[name] = ch
 		}
 	}
@@ -356,6 +374,9 @@ func PassWith(ctx context.Context, cli *docker.Client, st lease.Store, cfg Confi
 				if ch.after != nil && l.State == lease.StateStopped &&
 					(l.RemoveAfter == nil || *l.RemoveAfter != *ch.after || l.RemoveAfterFrom != ch.afterFrom) {
 					l.RemoveAfter, l.RemoveAfterFrom = ch.after, ch.afterFrom
+				}
+				if ch.setServices && !slices.Equal(l.Services, ch.services) {
+					l.Services = ch.services
 				}
 				m[name] = l
 			}
@@ -812,7 +833,10 @@ func removeProject(ctx context.Context, cli *docker.Client, st lease.Store, proj
 	// deadline are re-checked under the lock: a lease that went live
 	// since the snapshot (even one that already expired again) has not
 	// had its stopped period, and a clock that moved back delays the
-	// deadline. Anything else: leave the lease alone.
+	// deadline. Anything else: leave the lease alone. leaseServices keeps
+	// the services the stopped lease recorded, for the image rule after
+	// the containers are gone.
+	leaseServices := []string(nil)
 	if err := st.Update(func(m map[string]lease.Lease) error {
 		l, ok := m[project]
 		if !ok {
@@ -830,6 +854,7 @@ func removeProject(ctx context.Context, cli *docker.Client, st lease.Store, proj
 			}
 		}
 		l.State = "removing"
+		leaseServices = l.Services
 		m[project] = l
 		return nil
 	}); err != nil {
@@ -969,15 +994,25 @@ func removeProject(ctx context.Context, cli *docker.Client, st lease.Store, proj
 		removeOne("remove-volume", v.ID, v.Name, "in use by another container", cli.RemoveVolume(ctx, v.Name))
 	}
 
-	// Images: what the containers ran from (collected in this pass) or a
-	// <project>-<service> tag for the image's own service label. Untagged
-	// leftovers, images that only inherited the project label, and
-	// custom-named images no container runs from are never removed: they
-	// are reported in the log only. A cancelled context skips the listing
-	// altogether.
+	// Images: the removal lists them unfiltered, so the project's own
+	// unlabelled built images (Compose v2 builds images without labels)
+	// are in view too, and the rule below keeps only what is not this
+	// removal's. An image is removed when a container of the project ran
+	// from it (collected in this pass), or one of its tags has the
+	// <project>-<service> shape for the image's own service label, or it
+	// carries no project label at all and one of its tags has the
+	// repository exactly <project>-<service> for one of the project's
+	// services - the service labels of the containers in this listing
+	// or, when no container is left, the services the lease recorded.
+	// Images of another project, untagged leftovers, images that only
+	// inherited the project label, custom-named images no container runs
+	// from and pulled images such as postgres:16-alpine are never
+	// removed: they are reported in the log only. A cancelled context
+	// skips the listing altogether.
+	svcs := ServicesOf(conts, leaseServices)
 	var imgs []docker.Object
 	if ctx.Err() == nil {
-		imgs, err = cli.Images(ctx, project)
+		imgs, err = cli.Images(ctx, "")
 		if err != nil {
 			act(log, via, now(), project, "remove", "", "", err)
 			failed = append(failed, project)
@@ -988,12 +1023,18 @@ func removeProject(ctx context.Context, cli *docker.Client, st lease.Store, proj
 		if ctx.Err() != nil {
 			break
 		}
+		// An image of another project is never this removal's: it stays
+		// untouched, silently - reporting it skipped would charge the
+		// other project's images against this removal's report.
+		if p := i.Labels[docker.ProjectLabel]; p != "" && p != project {
+			continue
+		}
 		if keptImgs[i.ID] {
 			actSkip(log, via, now(), project, "remove-image", i.ID, i.Name, "a kept container of the project runs from it")
 			skipped = append(skipped, i.Name)
 			continue
 		}
-		if !removableImage(i, project, usedImgs) {
+		if !ImageRemovable(i, project, svcs, usedImgs) {
 			reason := "no container of the project runs from it and its tags do not carry the project's service name"
 			if i.Untagged {
 				reason = "untagged leftover of an earlier build"
@@ -1016,14 +1057,6 @@ func removeProject(ctx context.Context, cli *docker.Client, st lease.Store, proj
 		return skipped, failed, false, err
 	}
 	return skipped, failed, len(failed) == 0, nil
-}
-
-// removableImage reports whether an image of the project is eligible for
-// removal: a container of the project ran from it (collected in this
-// pass), or one of its tags has the <project>-<service> shape for the
-// image's own service label.
-func removableImage(i docker.Object, project string, used map[string]bool) bool {
-	return used[i.ID] || docker.ImageTagMatches(project, i)
 }
 
 func is404(err error) bool {

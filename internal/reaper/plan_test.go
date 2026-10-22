@@ -47,7 +47,8 @@ func TestPlanForMatchesEngineActions(t *testing.T) {
 	// never removed.
 	srv.AddLabels("image", "sha256:pg16", "postgres:16-alpine", nil)
 
-	// Project "myapp": a plain stack; everything goes.
+	// Project "myapp": a plain stack; everything goes, including the
+	// unlabelled built images Compose v2 leaves.
 	srv.AddContainerWithUses("p-web", "myapp_web_1", map[string]string{
 		docker.ProjectLabel: "myapp", docker.ServiceLabel: "web",
 	}, "sha256:pimg", nil, nil)
@@ -60,10 +61,30 @@ func TestPlanForMatchesEngineActions(t *testing.T) {
 		docker.ProjectLabel: "myapp", docker.ServiceLabel: "old",
 	}, "sha256:pimg", nil, nil)
 	srv.StopContainer("p-old")
+	// p-worker runs from an unlabelled built image (Compose v2 builds
+	// images without labels); p-db2 runs from a pulled image.
+	srv.AddContainerWithUses("p-worker", "myapp_worker_1", map[string]string{
+		docker.ProjectLabel: "myapp", docker.ServiceLabel: "worker",
+	}, "sha256:unlab", nil, nil)
+	srv.AddContainerWithUses("p-db2", "myapp_db_2", map[string]string{
+		docker.ProjectLabel: "myapp", docker.ServiceLabel: "db",
+	}, "sha256:pg2", nil, nil)
+	srv.SetContainerImageRef("p-db2", "postgres:16-alpine")
 	srv.Add("network", "n-myapp", "myapp_default", "myapp")
 	srv.Add("volume", "v-myapp", "myapp_data", "myapp")
 	srv.AddLabels("image", "sha256:pimg", "myapp-web:latest", map[string]string{
 		docker.ProjectLabel: "myapp", docker.ServiceLabel: "web",
+	})
+	// The unlabelled built images: one a container runs from, one with no
+	// container left (the service moved on), and the pulled image p-db2
+	// runs from.
+	srv.AddLabels("image", "sha256:unlab", "myapp-worker:latest", nil)
+	srv.AddLabels("image", "sha256:left", "myapp-db:latest", nil)
+	srv.AddLabels("image", "sha256:pg2", "postgres:16-alpine", nil)
+	// An image labelled for another project but tagged like myapp's web
+	// image: neither removal may touch it.
+	srv.AddLabels("image", "sha256:xlab", "myapp-web:latest", map[string]string{
+		docker.ProjectLabel: "other", docker.ServiceLabel: "web",
 	})
 
 	cli := docker.New(srv.Socket)
@@ -92,7 +113,7 @@ func TestPlanForMatchesEngineActions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: volumes: %v", project, err)
 		}
-		imgs, err := cli.Images(ctx, project)
+		imgs, err := cli.Images(ctx, "")
 		if err != nil {
 			t.Fatalf("%s: images: %v", project, err)
 		}
@@ -112,12 +133,11 @@ func TestPlanForMatchesEngineActions(t *testing.T) {
 		}
 		slices.Sort(runningBefore)
 		return snapshot{
-			plan: PlanFor(project, conts, nets, vols, imgs),
+			plan: PlanFor(project, ServicesOf(conts, nil), conts, nets, vols, imgs),
 			initial: map[string][]string{
 				"container": names(conts),
 				"network":   names(nets),
 				"volume":    names(vols),
-				"image":     names(imgs),
 			},
 			runningBefore: runningBefore,
 		}
@@ -151,14 +171,14 @@ func TestPlanForMatchesEngineActions(t *testing.T) {
 		Networks:   []string{},
 		Volumes:    []string{"web_data"},
 		Images:     []string{"other-web:latest"},
-		Kept:       []string{"db_data", "keep_me", "other_db_1", "other_default"},
+		Kept:       []string{"db_data", "keep_me", "other_db_1", "other_default", "postgres:16-alpine"},
 	})
 	assertPlan("myapp", myapp.plan, Plan{
-		Stop:       []string{"myapp_db_1", "myapp_web_1"},
-		Containers: []string{"myapp_db_1", "myapp_old_1", "myapp_web_1"},
+		Stop:       []string{"myapp_db_1", "myapp_db_2", "myapp_web_1", "myapp_worker_1"},
+		Containers: []string{"myapp_db_1", "myapp_db_2", "myapp_old_1", "myapp_web_1", "myapp_worker_1"},
 		Networks:   []string{"myapp_default"},
 		Volumes:    []string{"myapp_data"},
-		Images:     []string{"myapp-web:latest"},
+		Images:     []string{"myapp-db:latest", "myapp-web:latest", "myapp-worker:latest"},
 		Kept:       []string{},
 	})
 
@@ -254,9 +274,8 @@ func TestPlanForMatchesEngineActions(t *testing.T) {
 			"container": tc.sn.plan.Containers,
 			"network":   tc.sn.plan.Networks,
 			"volume":    tc.sn.plan.Volumes,
-			"image":     tc.sn.plan.Images,
 		}
-		for _, kind := range []string{"container", "network", "volume", "image"} {
+		for _, kind := range []string{"container", "network", "volume"} {
 			del := map[string]bool{}
 			for _, n := range remove[kind] {
 				del[n] = true
@@ -276,9 +295,28 @@ func TestPlanForMatchesEngineActions(t *testing.T) {
 			}
 		}
 	}
-	// The pulled image survives: it never appears in a project listing.
-	if !srv.Has("image", "sha256:pg16") {
-		t.Error("the pulled image postgres:16-alpine was removed")
+	// The removal lists images unfiltered (the unlabelled Compose v2 built
+	// images are in the plan) and one tag name can sit on several images,
+	// so the surviving images are pinned id by id.
+	if srv.Count("image") != 4 {
+		t.Fatalf("images left = %d, want 4", srv.Count("image"))
+	}
+	for _, w := range []struct {
+		id   string
+		gone bool
+	}{
+		{"sha256:kuimg", true},    // other's built image, a container ran from it
+		{"sha256:inherit", false}, // built FROM a project image: the tag does not match, no container runs from it
+		{"sha256:pg16", false},    // the pulled image a kept container runs from
+		{"sha256:pimg", true},     // myapp's built image, three containers ran from it
+		{"sha256:unlab", true},    // myapp's unlabelled built image, a container ran from it
+		{"sha256:left", true},     // myapp's unlabelled built image, no container left: the db tag matches the db service
+		{"sha256:pg2", false},     // the pulled image a non-kept container runs from
+		{"sha256:xlab", false},    // labelled for other, tagged like myapp's web image
+	} {
+		if got := srv.Has("image", w.id); got == w.gone {
+			t.Errorf("image %s gone=%v, want gone=%v", w.id, got, w.gone)
+		}
 	}
 }
 

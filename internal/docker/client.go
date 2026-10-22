@@ -303,6 +303,8 @@ func (c *Client) Projects(ctx context.Context) (map[string]bool, error) {
 		// label but carries its own tag: it does not count. An untagged
 		// leftover never counts on its own: it is removable only when the
 		// removal collects the id of an image the containers ran from.
+		// An unlabelled image never makes a project present, whatever
+		// its tags: there is no label to find the project by.
 		if ImageTagMatches(p, Object{ID: it.Id, Labels: it.Labels, RepoTags: it.RepoTags}) {
 			projects[p] = true
 		}
@@ -324,7 +326,16 @@ func ImageTagMatches(project string, i Object) bool {
 	if service == "" {
 		return false
 	}
-	for _, tag := range i.RepoTags {
+	return TagMatchesService(project, service, i.RepoTags)
+}
+
+// TagMatchesService reports whether one of the image's repository tags
+// has the repository part exactly <project>-<service>: the tag name
+// compose gives an image built for one service of the project. The
+// repository part is the whole of the tag before its tag colon (see
+// repository), so a registry host and path never match.
+func TagMatchesService(project, service string, tags []string) bool {
+	for _, tag := range tags {
 		if repo, ok := repository(tag); ok && repo == project+"-"+service {
 			return true
 		}

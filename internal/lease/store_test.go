@@ -207,6 +207,42 @@ func TestConcurrentUpdatesKeepBothHolders(t *testing.T) {
 	}
 }
 
+// A state file written before services existed loads: the services field
+// is simply empty, and a rewrite keeps version 1, so an older binary can
+// still read the file.
+func TestOldFileWithoutServicesLoads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "leases.json")
+	old := []byte("{\n  \"version\": 1,\n  \"header\": {\"patterns\": [\"myapp\"], \"default_ttl\": 7200000000000},\n  \"leases\": {\"myapp\": {\"project\": \"myapp\", \"holders\": [{\"name\": \"ci\", \"extended_at\": \"2026-10-20T12:00:00Z\", \"expires\": \"2026-10-20T14:00:00Z\", \"ttl\": 7200000000000}]}}\n}\n")
+	if err := os.WriteFile(path, old, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := Store{Path: path}
+	leases, err := st.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, ok := leases["myapp"]
+	if !ok {
+		t.Fatal("the old file's lease did not load")
+	}
+	if len(l.Services) != 0 {
+		t.Fatalf("Services = %v, want empty for a file written without the field", l.Services)
+	}
+	if err := st.Update(func(m map[string]Lease) error {
+		m["myapp"] = l
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, []byte("\"version\": 1")) {
+		t.Fatalf("the rewritten file does not keep version 1:\n%s", data)
+	}
+}
+
 // TestHelperProcess is the subprocess half of
 // TestConcurrentUpdatesKeepBothHolders: it extends one holder n times and
 // exits.

@@ -76,7 +76,17 @@ type Lease struct {
 	// without one. Extend, release and revive leave it alone; the sweep
 	// refreshes it every pass.
 	LabelRemoveAfter *time.Duration `json:"label_remove_after,omitempty"`
-	Holders          []Holder       `json:"holders"`
+	// Services are the com.docker.compose.service labels of the project's
+	// containers, sorted and unique, recorded by the same sweep refresh
+	// that records LabelRemoveAfter, so a later compose down cannot erase
+	// them before the stop: the removal's image rule reads them to
+	// recognise the project's unlabelled built images (Compose v2 builds
+	// images without labels) once no container is left. Nil when no
+	// container ever carried a service label, or the last sweep saw
+	// containers without one. Extend, ExtendProject, release and revive
+	// leave it alone; the sweep refreshes it every pass.
+	Services []string `json:"services,omitempty"`
+	Holders  []Holder `json:"holders"`
 }
 
 // RecordedDelay is the removal delay recorded at the stop, or the given

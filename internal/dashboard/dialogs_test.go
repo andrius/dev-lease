@@ -75,6 +75,8 @@ func TestRemoveDialogLiveStopsFirstAndListsKeptImages(t *testing.T) {
 		docker.ProjectLabel: "myapp", docker.ServiceLabel: "web",
 	}, "sha256:i1", nil, nil)
 	srv.SetContainerImageRef("c1", "ghcr.io/andrius/tool:latest")
+	// The pulled image sits on the daemon unlabelled, as a real one does.
+	srv.AddLabels("image", "sha256:i1", "ghcr.io/andrius/tool:latest", nil)
 	ts := h.serve(t, Options{})
 	rm := removeDialog(t, body(t, get(t, ts.URL+"/stacks/myapp?confirm=remove")))
 	if !strings.Contains(rm, "This stops the stack first.") {
@@ -152,6 +154,8 @@ func TestDialogsFollowPlan(t *testing.T) {
 		docker.ProjectLabel: "myapp", docker.ServiceLabel: "db", docker.KeepLabel: "true",
 	}, "sha256:pg16", []string{"myapp_default"}, []string{"db_data"})
 	srv.SetContainerImageRef("c-db", "postgres:16-alpine")
+	// The pulled image sits on the daemon unlabelled, as a real one does.
+	srv.AddLabels("image", "sha256:pg16", "postgres:16-alpine", nil)
 	srv.Add("network", "n1", "myapp_default", "myapp")
 	srv.Add("volume", "v1", "app_data", "myapp")
 	srv.Add("volume", "v2", "db_data", "myapp")

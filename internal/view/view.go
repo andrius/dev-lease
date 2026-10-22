@@ -472,10 +472,16 @@ func Details(ctx context.Context, cli *docker.Client, st lease.Store, cfg reaper
 	}
 	sort.Strings(d.Networks)
 
-	// The image split follows the removal's rules: a container of the
-	// project ran from it, or its tag matches <project>-<service> for its
-	// own service label, means removed; everything else stays.
-	imgs, err := cli.Images(ctx, name)
+	// The image split follows the removal's rules (reaper.ImageRemovable):
+	// an image a container of the project ran from, an image with a
+	// <project>-<service> tag for its own service label, and an unlabelled
+	// image (Compose v2 builds images without labels) with a repository
+	// tag exactly <project>-<service> for one of the project's services
+	// is removed; everything else stays. The listing is unfiltered, so
+	// the unlabelled built images and the pulled images the containers
+	// run from are in view. The images of other projects are not part of
+	// this project's split at all: the removal never looks at them.
+	imgs, err := cli.Images(ctx, "")
 	if err != nil {
 		return Detail{}, err
 	}
@@ -491,42 +497,24 @@ func Details(ctx context.Context, cli *docker.Client, st lease.Store, cfg reaper
 			used[c.ImageID] = true
 		}
 	}
+	leases, lerr := st.Read()
+	if lerr != nil {
+		return Detail{}, lerr
+	}
+	l := leases[name]
+	svcs := reaper.ServicesOf(conts, l.Services)
 	for _, i := range imgs {
+		if p := i.Labels[docker.ProjectLabel]; p != "" && p != name {
+			continue
+		}
 		nameOf := i.Name
 		if nameOf == "" {
 			nameOf = i.ID
 		}
-		if keptImgs[i.ID] || (!used[i.ID] && !docker.ImageTagMatches(name, i)) {
+		if keptImgs[i.ID] || !reaper.ImageRemovable(i, name, svcs, used) {
 			d.KeptImages = append(d.KeptImages, nameOf)
 		} else {
 			d.RemovedImages = append(d.RemovedImages, nameOf)
-		}
-	}
-	// Pulled images the project's containers run from carry no project
-	// label, so the label-filtered listing above never sees them. They
-	// stay whatever happens (design 6a), and the page says so: each such
-	// image enters KeptImages under its reference.
-	listed := map[string]bool{}
-	for _, i := range imgs {
-		listed[i.ID] = true
-	}
-	for _, c := range conts {
-		if c.ImageID == "" || listed[c.ImageID] {
-			continue
-		}
-		ref := c.ImageRef
-		if ref == "" {
-			ref = c.ImageID
-		}
-		already := false
-		for _, k := range d.KeptImages {
-			if k == ref {
-				already = true
-				break
-			}
-		}
-		if !already {
-			d.KeptImages = append(d.KeptImages, ref)
 		}
 	}
 	sort.Strings(d.KeptImages)
@@ -535,7 +523,7 @@ func Details(ctx context.Context, cli *docker.Client, st lease.Store, cfg reaper
 	// The plan comes from the exact listings this detail was built from,
 	// so what the dialogs promise is what a stop or removal on the same
 	// daemon state would do.
-	d.Plan = reaper.PlanFor(name, conts, nets, vols, imgs)
+	d.Plan = reaper.PlanFor(name, svcs, conts, nets, vols, imgs)
 
 	if logService != "" {
 		for _, c := range conts {

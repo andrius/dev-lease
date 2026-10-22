@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -419,6 +420,66 @@ func TestReleaseKeepsLabelDelay(t *testing.T) {
 	released := Release(Lease{Project: "myapp", State: StateStopped, StoppedAt: testNow, LabelRemoveAfter: &zero}, "ci", false, testNow.Add(time.Hour))
 	if released.LabelRemoveAfter == nil || *released.LabelRemoveAfter != 0 {
 		t.Fatalf("LabelRemoveAfter after Release = %v, want 0", released.LabelRemoveAfter)
+	}
+}
+
+// An extend (the lease stays live) leaves the recorded services alone:
+// only a sweep that sees containers changes them.
+func TestExtendKeepsServices(t *testing.T) {
+	l, err := Extend(Lease{Project: "myapp", Services: []string{"db", "web"}}, "ci", time.Hour, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(l.Services, []string{"db", "web"}) {
+		t.Fatalf("Services after Extend = %v, want the record kept", l.Services)
+	}
+}
+
+// The revive inside ExtendProject clears the stop's recorded delay but
+// not the recorded services.
+func TestExtendProjectKeepsServices(t *testing.T) {
+	l := Lease{
+		Project:   "myapp",
+		State:     StateStopped,
+		StoppedAt: testNow,
+		Services:  []string{"db", "web"},
+	}
+	m := map[string]Lease{"myapp": l}
+	if revived, err := ExtendProject(m, "myapp", "ci", time.Hour, testNow); err != nil || !revived {
+		t.Fatalf("ExtendProject = %v, %v; want revived without error", revived, err)
+	}
+	if got := m["myapp"].Services; !slices.Equal(got, []string{"db", "web"}) {
+		t.Fatalf("Services after ExtendProject = %v, want the record kept through the revive", got)
+	}
+}
+
+// A release keeps the recorded services: the new tenant inherits the
+// same recognition.
+func TestReleaseKeepsServices(t *testing.T) {
+	released := Release(Lease{Project: "myapp", State: StateStopped, StoppedAt: testNow, Services: []string{"web"}}, "ci", false, testNow.Add(time.Hour))
+	if !slices.Equal(released.Services, []string{"web"}) {
+		t.Fatalf("Services after Release = %v, want web kept", released.Services)
+	}
+}
+
+func TestServicesRoundTrip(t *testing.T) {
+	st := Store{Path: filepath.Join(t.TempDir(), "leases.json")}
+	if err := st.Update(func(m map[string]Lease) error {
+		m["myapp"] = Lease{Project: "myapp", Services: []string{"db", "web"}}
+		m["other"] = Lease{Project: "other"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	leases, err := st.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l := leases["myapp"]; !slices.Equal(l.Services, []string{"db", "web"}) {
+		t.Fatalf("myapp Services = %v, want [db web] round-tripped", l.Services)
+	}
+	if l := leases["other"]; len(l.Services) != 0 {
+		t.Fatalf("other Services = %v, want none written", l.Services)
 	}
 }
 

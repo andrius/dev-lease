@@ -135,7 +135,7 @@ func TestDashboardStopAndControlRemoveAgainstRealDocker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listing images: %v", err)
 	}
-	plan := reaper.PlanFor(it, conts, nets, vols, imgs)
+	plan := reaper.PlanFor(it, reaper.ServicesOf(conts, nil), conts, nets, vols, imgs)
 
 	// The plan promises a bare removal: nothing to stop (the only running
 	// container is kept), exactly the non-kept container, its volume and
