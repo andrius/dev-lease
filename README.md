@@ -1,9 +1,45 @@
 # dev-lease
 
-TTL leases for local Docker Compose stacks. A stack nobody is using is
-stopped when its lease expires, and removed after a grace period (7 days by
-default). Built for machines that run many git worktrees and AI coding
-agents at once.
+dev-lease stops and then removes the Docker Compose stacks nobody uses any
+more. It is one small container on a Linux machine with Docker. Every stack
+whose Compose project name matches your patterns gets a lease, and whoever
+uses the stack extends it: a person, a script, a CI job, an AI agent's hook.
+
+- When the lease expires, the stack is stopped: its RAM and CPU are free
+  again, and its data stays.
+- When it stays stopped for 7 days (the delay is yours to set), it is
+  removed: its containers, networks, volumes and the images Compose built
+  for it.
+- Labels in your compose file keep a service or a volume, or change the
+  delay for one stack (`0`: stopped, never removed by a sweep).
+- You see and extend the stacks on the command line; the
+  [web dashboard](#dashboard) can also stop and remove them, and AI agents
+  see, stop and remove them over [MCP](#mcp-for-ai-agents).
+- It never starts, builds or pulls anything, and never touches a project
+  outside your patterns.
+
+Built for machines that run many git worktrees and AI coding agents at
+once. For AI agents, [Summary for AI agents](#summary-for-ai-agents) has
+the facts in short form.
+
+## Contents
+
+- [Why](#why)
+- [How it works](#how-it-works)
+  - [When a stopped stack is removed](#when-a-stopped-stack-is-removed)
+  - [What belongs to a stack](#what-belongs-to-a-stack)
+  - [Labels](#labels)
+  - [Check what dev-lease sees](#check-what-dev-lease-sees)
+- [Quick start](#quick-start)
+- [Dashboard](#dashboard)
+- [MCP for AI agents](#mcp-for-ai-agents)
+- [With git worktrees](#with-git-worktrees)
+- [With automation and AI agents](#with-automation-and-ai-agents)
+- [Commands](#commands)
+- [Safety](#safety)
+- [Images and platforms](#images-and-platforms)
+- [Summary for AI agents](#summary-for-ai-agents)
+- [Development](#development)
 
 ## Why
 
@@ -39,13 +75,21 @@ stateDiagram-v2
 | stopped | Stops every container of the project except kept ones (`--stop-timeout`). Deletes nothing. | `docker compose up -d` brings it back with its data, and it gets the default lease at the next sweep; `extend` renews the lease (you start the stack). |
 | removed | Removes the containers, networks, volumes (with their data) and the project's own images. Then the lease is deleted. | If the project shows up again, it starts as a new one. |
 
+dev-lease is one small container, `dev-lease serve`, that sweeps every
+minute. It runs all the time by default and comes back with Docker after a
+reboot. It never starts, builds or pulls anything. You talk to it with
+`docker exec`, look at it in the [dashboard](#dashboard), and let agents use
+it over [MCP](#mcp-for-ai-agents).
+
 `--remove-after 0` turns the sweep's removals off: expired stacks are only
 stopped. (You can still remove one yourself from the dashboard, behind its
 typed name; MCP refuses.)
 
-**When a stopped stack is removed.** Its delay is recorded when it stops
-and counted from the stop: the stack's own `dev-lease.remove-after` label,
-else serve's `--remove-after` at that moment. A label's delay stays as it
+### When a stopped stack is removed
+
+A stopped stack's delay is recorded when it stops and counted from the
+stop: the stack's own `dev-lease.remove-after` label, else serve's
+`--remove-after` at that moment. A label's delay stays as it
 is. A delay taken from serve's setting is never cut by a later, shorter
 setting, and a longer one lengthens it while it is in force.
 `--remove-after 0` pauses every sweep removal while it is set; when it is lifted,
@@ -53,15 +97,12 @@ the delays apply again under the new setting, so stacks already past theirs
 go at the next sweep. A stack without a label that stops while serve runs
 with `0` records `0` and stays until someone starts or extends it.
 
-dev-lease is one small container, `dev-lease serve`, that sweeps every
-minute. It runs all the time by default and comes back with Docker after a
-reboot. It never starts, builds or pulls anything. You talk to it with
-`docker exec`, look at it in the [dashboard](#dashboard), and let agents use
-it over [MCP](#mcp-for-ai-agents).
+### What belongs to a stack
 
-**What belongs to a stack.** Only projects whose Compose project name
-matches your `--projects` patterns are touched; everything else on the
-machine, dev-lease's own project included, is never stopped or removed. A project's objects are found by the Compose label
+Only projects whose Compose project name matches your `--projects`
+patterns are touched; everything else on the machine, dev-lease's own
+project included, is never stopped or removed. A project's objects are
+found by the Compose label
 `com.docker.compose.project`. Its own images are the images Compose built
 for it: with the project label, the ones its containers ran from and the
 ones tagged `<project>-<service>:<tag>`; without any label (Compose v2 builds
@@ -75,8 +116,10 @@ of `myapp-feat` both build `myapp-feat-web`.) An object Docker refuses or fails 
 place; if that leaves the stack present, it is treated as a new one: it gets
 the default lease, and is stopped and later removed again.
 
-**Keep things, or change the policy per stack.** Labels in your own
-compose file:
+### Labels
+
+Labels in your own compose file keep things, or change the policy for one
+stack:
 
 ```yaml
 services:
@@ -109,7 +152,9 @@ labels to its containers, so an image you build `FROM` can carry these
 labels too. `dev-lease.keep` works on services and volumes, not on
 networks.
 
-**Check what dev-lease sees.** `dl status` lists, per stack, the containers,
+### Check what dev-lease sees
+
+`dl status` ([Quick start](#quick-start), step 3) lists, per stack, the containers,
 networks, volumes and images it counts as the stack's, and the dashboard's
 stack page shows which images go with the stack and which stay. To read the
 labels yourself:
@@ -353,6 +398,55 @@ gh attestation verify oci://ghcr.io/andrius/dev-lease:v0.1.0 --owner andrius
 CI runs on Linux. Docker Desktop on macOS and Windows is not tested yet (the
 [release checklist](docs/release-checklist.md) has the manual steps); its
 Enhanced Container Isolation mode blocks socket mounts and is not supported.
+
+## Summary for AI agents
+
+The facts an AI agent needs on a machine where dev-lease runs. Commands
+below that start with `dev-lease` run inside the serve container: prefix
+each with `docker exec "$(docker ps -qf label=dev-lease.role=server)"`. If
+that finds no container, serve is not running (the on-demand example exits
+when idle); the example scripts start it when `DEV_LEASE_COMPOSE` is set.
+The full behaviour is in [docs/reference.md](docs/reference.md).
+
+- **What is managed.** Compose projects whose name matches serve's
+  `--projects` glob patterns; `dev-lease extend` exits 2 for any other
+  name. A project's objects are the ones carrying its
+  `com.docker.compose.project` label. Nothing else on the daemon is touched.
+- **What happens to a managed stack.** It gets a lease (2h by default). At
+  expiry every container is stopped, except services labelled
+  `dev-lease.keep`; no data is deleted. After the removal delay (7 days by
+  default, counted from the stop) its containers, networks, volumes with
+  their data, and the images Compose built for it are removed. A removal
+  cannot be undone.
+- **Before you use a stack,** extend its lease with a TTL that covers the
+  job (1m to 7d): `dev-lease extend <project> <ttl> --holder <your-name>`.
+  A shorter extend never cuts a lease. Do not extend a stack you are not
+  using.
+- **When you are done:** `dev-lease release <project> --holder <your-name>`.
+- **To see the state:** `dev-lease list` prints one line per lease (live
+  with its time left and holders, expired, or stopped and when it is
+  removed); `dev-lease status` lists every managed stack with its
+  containers, networks, volumes and images.
+- **A stopped stack is not lost:** `docker compose -p <project> up -d`, run
+  on the host in the stack's own directory, brings it back with its data
+  (`stack_details` and the dashboard print the exact command as
+  `start_command`). A removed stack is gone, volumes included.
+- **To protect data,** use the [labels](#labels): `dev-lease.keep: "true"`
+  on a volume or a service, or `dev-lease.remove-after: "0"` on a service
+  (the stack is only stopped, never removed by a sweep). A label on an
+  existing volume needs the volume recreated.
+- **Over MCP** (`dev-lease mcp`): `list_stacks` and `stack_details` only
+  read. `stop_stack` stops the stack now and ends every holder's claim, so
+  do not stop a stack whose `holders` in `list_stacks` is not empty.
+  `remove_stack` deletes data and needs `confirm` equal to the stack name;
+  a stack marked never remove is always refused. Ask the person before you
+  remove a stack.
+- **Exit codes:** 0 ok; 1 a usage error, a bad TTL, an unreadable state
+  file or a failed Docker listing; 2 not a managed project; 3 the stack is
+  being stopped or removed right now, retry in a moment.
+- **To tell agents in your own repository,** paste
+  [AGENTS-snippet.md](examples/agents/AGENTS-snippet.md) into its
+  `AGENTS.md`.
 
 ## Development
 
