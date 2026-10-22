@@ -9,6 +9,9 @@ on:
   # Called by the release pipeline so a tag push runs the same checks
   # before the image is built and pushed.
   workflow_call:
+  # Started by the release's docs job after it pushed the version bump: a
+  # push made with the workflow token starts no workflow by itself.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -83,6 +86,8 @@ jobs:
         run: |
           set -euo pipefail
           for f in .github/scripts/*.sh; do bash -n "$f"; shellcheck "$f"; done
+          # The release's docs job rewrites only the image references.
+          .github/scripts/test-bump-docs-version.sh
           OUT_DIR="$(mktemp -d)"
           export OUT_DIR
           REF=v0.0.0-ci SHA="$GITHUB_SHA" .github/scripts/image-meta.sh
@@ -108,9 +113,12 @@ jobs:
           DEV_LEASE_INTERVAL: 5s
         run: |
           set -e
-          # The example file names ghcr.io/andrius/dev-lease:v0.1.0; tag the
-          # freshly built image so compose uses it instead of pulling.
-          docker tag dev-lease:ci ghcr.io/andrius/dev-lease:v0.1.0
+          # Tag the freshly built image as the example file names it, so
+          # compose uses it instead of pulling (the release's docs job
+          # moves that tag to each new release).
+          image=$(sed -n 's#^ *image: \(ghcr\.io/andrius/dev-lease:[^ ]*\)$#\1#p' examples/basic/compose.yml)
+          [ -n "$image" ] || { echo "examples/basic/compose.yml names no dev-lease image" >&2; exit 1; }
+          docker tag dev-lease:ci "$image"
           target=$(mktemp)
           printf 'services:\n  hold:\n    image: busybox\n    command: sleep 300\n' > "$target"
           trap 'docker compose -p "$DL_OWN" -f examples/basic/compose.yml down -v --remove-orphans || true; docker compose -p "$DL_TARGET" -f "$target" down -v --remove-orphans || true' EXIT

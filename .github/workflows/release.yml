@@ -18,6 +18,8 @@ jobs:
   image:
     needs: test
     runs-on: ubuntu-26.04
+    outputs:
+      latest: ${{ steps.meta.outputs.latest }}
     permissions:
       contents: read
       packages: write
@@ -50,6 +52,7 @@ jobs:
           .github/scripts/image-meta.sh
           {
             echo "tags=$(cat "$OUT_DIR/tags")"
+            echo "latest=$(cat "$OUT_DIR/latest")"
             echo "labels<<EOF_META"
             cat "$OUT_DIR/labels"
             echo "EOF_META"
@@ -73,3 +76,35 @@ jobs:
           subject-name: ghcr.io/andrius/dev-lease
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+  # Once the image is published, the README and the example compose files
+  # name the new tag: one commit to main, for the tag :latest moved to
+  # (the highest non-pre-release tag) and only then. A push made with the
+  # workflow token starts no workflow, so the job starts CI on main itself.
+  docs:
+    needs: image
+    if: needs.image.outputs.latest == 'true'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          fetch-depth: 0
+          # The job pushes the bump commit with the workflow token.
+          persist-credentials: true
+      - name: point the docs at the new tag and start CI on main
+        env:
+          REF: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          out="$(.github/scripts/release-docs-bump.sh)"
+          echo "$out"
+          if [ "$out" = pushed ]; then
+            gh workflow run ci.yml --ref main
+          fi

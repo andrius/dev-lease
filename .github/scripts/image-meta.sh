@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Image metadata for a release: tags, labels and annotations, written one
-# per line to $OUT_DIR/tags, $OUT_DIR/labels and $OUT_DIR/annotations.
+# per line to $OUT_DIR/tags, $OUT_DIR/labels and $OUT_DIR/annotations, and
+# $OUT_DIR/latest ("true" when :latest moves to this tag; the release's
+# docs job follows the same rule).
 #
 # The static values (title, description, url, source, documentation,
 # licenses) are read from the Dockerfile's LABEL, so the image config, the
@@ -25,12 +27,15 @@ fi
 # :latest moves only when the tag is the highest non-pre-release tag.
 tags="ghcr.io/andrius/dev-lease:$REF"
 highest="$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)"
+latest=false
 if [ -n "$highest" ] && [ "$highest" = "$REF" ]; then
   tags="$tags,ghcr.io/andrius/dev-lease:latest"
+  latest=true
 else
   echo "tag $REF is not the highest non-pre-release tag (${highest:-none}); :latest stays" >&2
 fi
 printf '%s\n' "$tags" > "$OUT_DIR/tags"
+printf '%s\n' "$latest" > "$OUT_DIR/latest"
 
 # key="value" pairs of the Dockerfile's LABEL lines.
 static="$(sed -n 's/^.*\(org\.opencontainers\.image\.[a-z]*\)="\([^"]*\)".*$/\1=\2/p' Dockerfile)"

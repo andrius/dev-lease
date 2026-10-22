@@ -46,11 +46,11 @@ After the tag push has built the image:
 1. Make the `ghcr.io/andrius/dev-lease` package public (package
    settings, visibility). Pull the image logged out
    (`docker logout ghcr.io` first).
-2. `docker run --rm ghcr.io/andrius/dev-lease:v0.1.0` prints the usage.
-3. `docker run --rm ghcr.io/andrius/dev-lease:v0.1.0 -version` prints
-   `dev-lease v0.1.0`.
-4. `gh attestation verify oci://ghcr.io/andrius/dev-lease:v0.1.0 --owner andrius`
+2. `docker run --rm ghcr.io/andrius/dev-lease:<version>` prints the usage.
+3. `docker run --rm ghcr.io/andrius/dev-lease:<version> -version` prints
+   `dev-lease <version>`.
+4. `gh attestation verify oci://ghcr.io/andrius/dev-lease:<version> --owner andrius`
    passes (gh 2.49 or later).
 5. The package page on GitHub shows the description, and
-   `docker buildx imagetools inspect ghcr.io/andrius/dev-lease:v0.1.0 --format '{{json .Manifest.Annotations}}'`
+   `docker buildx imagetools inspect ghcr.io/andrius/dev-lease:<version> --format '{{json .Manifest.Annotations}}'`
    lists the description, version, revision and source annotations.
