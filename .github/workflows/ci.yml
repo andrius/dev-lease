@@ -1,0 +1,233 @@
+name: ci
+
+on:
+  # A tag push runs CI once, through the release workflow: it calls this
+  # one, and push events on tags do not create a second, parallel run.
+  push:
+    branches: ["**"]
+  pull_request:
+  # Called by the release pipeline so a tag push runs the same checks
+  # before the image is built and pushed.
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.27.x"
+      - name: vet
+        run: go vet ./...
+      - name: unit tests with the race detector
+        run: go test -race ./...
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+      - name: integration test (real Docker daemon)
+        run: go test -tags integration ./integration/...
+      - name: the compose examples refuse to start without the projects variable
+        run: |
+          set -e
+          # examples/*/compose.yml require DEV_LEASE_PROJECTS (":?");
+          # every compose command against the file must refuse without it.
+          for f in examples/basic/compose.yml examples/on-demand/compose.yml; do
+            # Unset (not set at all) and set-but-empty both refuse.
+            if env -u DEV_LEASE_PROJECTS docker compose -f "$f" config >/dev/null 2>&1; then
+              echo "$f: compose config succeeded with DEV_LEASE_PROJECTS unset" >&2
+              exit 1
+            fi
+            if DEV_LEASE_PROJECTS="" docker compose -f "$f" config >/dev/null 2>&1; then
+              echo "$f: compose config succeeded with an empty DEV_LEASE_PROJECTS" >&2
+              exit 1
+            fi
+            if ! DEV_LEASE_PROJECTS=myapp docker compose -f "$f" config >/dev/null; then
+              echo "$f: compose config failed although DEV_LEASE_PROJECTS was set" >&2
+              exit 1
+            fi
+          done
+      - name: the examples are valid
+        run: |
+          set -e
+          find examples -name 'compose*.yml' -exec sh -ec '
+            for f do DEV_LEASE_PROJECTS=myapp docker compose -f "$f" config -q || exit 1; done
+          ' sh {} +
+          find examples -name '*.sh' -exec sh -ec '
+            for f do bash -n "$f" || exit 1; shellcheck "$f" || exit 1; done
+          ' sh {} +
+          find examples -name '*.json' -exec sh -ec '
+            for f do jq empty "$f" || exit 1; done
+          ' sh {} +
+      - name: image builds and answers --help
+        run: |
+          docker build -t dev-lease:ci .
+          docker run --rm dev-lease:ci --help
+      - name: the example compose serves the documented client command
+        env:
+          DL_OWN: devlease-ci
+          DL_TARGET: devlease-ci-target
+          DEV_LEASE_PROJECTS: devlease-ci-target
+          # A short sweep interval so the smoke test does not depend on
+          # the second pass at the documented 1m default.
+          DEV_LEASE_INTERVAL: 5s
+        run: |
+          set -e
+          # The example file names ghcr.io/andrius/dev-lease:v0.1.0; tag the
+          # freshly built image so compose uses it instead of pulling.
+          docker tag dev-lease:ci ghcr.io/andrius/dev-lease:v0.1.0
+          target=$(mktemp)
+          printf 'services:\n  hold:\n    image: busybox\n    command: sleep 300\n' > "$target"
+          trap 'docker compose -p "$DL_OWN" -f examples/basic/compose.yml down -v --remove-orphans || true; docker compose -p "$DL_TARGET" -f "$target" down -v --remove-orphans || true' EXIT
+          docker compose -p "$DL_OWN" -f examples/basic/compose.yml up -d --wait
+          docker compose -p "$DL_TARGET" -f "$target" up -d --wait
+          # The documented one-liner must work from the shipped image: the
+          # binary sits at /usr/local/bin on the distroless PATH. Retry
+          # while serve takes its first pass and grants the default lease.
+          found=0
+          for _ in $(seq 1 30); do
+            if docker exec "$(docker ps -qf label=dev-lease.role=server)" dev-lease list | grep -q "$DL_TARGET"; then
+              echo "client command works from the shipped image"
+              found=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$found" != 1 ]; then
+            docker compose -p "$DL_OWN" -f examples/basic/compose.yml logs
+            exit 1
+          fi
+          # The dashboard answers on the published port: a known Host
+          # gets 200 with the smoke project's stack link in the page, a
+          # foreign Host gets 403. Grep the link, not the bare name: the
+          # name alone appears in log lines and headers too, so only the
+          # link proves the listing rendered.
+          curl -fsS -H 'Host: 127.0.0.1' http://127.0.0.1:8410/ | grep -q 'href="/stacks/"'"$DL_TARGET"'"'
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example' http://127.0.0.1:8410/)
+          if [ "$code" != 403 ]; then
+            echo "dashboard: a foreign Host got $code, want 403" >&2
+            exit 1
+          fi
+          echo "the dashboard serves the listing and refuses foreign Hosts"
+          # The agent hook example extends the smoke project with the
+          # ci-hook holder; list must show that holder (the default
+          # holder from the first pass stays first).
+          DEV_LEASE_HOLDER=ci-hook examples/agents/lease-extend.sh 2h "$DL_TARGET"
+          docker exec "$(docker ps -qf label=dev-lease.role=server)" dev-lease list | grep -q "ci-hook"
+          echo "the lease-extend example wrote a live lease held by ci-hook for $DL_TARGET"
+          docker compose -p "$DL_OWN" -f examples/basic/compose.yml logs
+
+  # The dashboard e2e specs. They run after the test job (whose last step
+  # is the smoke test), on their own runner with a fresh daemon: the serve
+  # manages only the two demo stacks, and its own project name does not
+  # match the managed pattern.
+  e2e:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.22.0"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: build the dev-lease image
+        run: docker build -t devlease-it-e2e:local .
+      - name: serve with the two demo stacks
+        env:
+          # The serve manages only the demo projects: its own project
+          # name devlease-it-e2e-serve does not match the pattern.
+          DEV_LEASE_PROJECTS: devlease-it-demo-*
+          # A short sweep interval so the setup does not depend on the
+          # second pass at the documented 1m default.
+          DEV_LEASE_INTERVAL: 5s
+        run: |
+          set -e
+          serve_container() { docker ps -qf label=dev-lease.role=server; }
+          dashboard() { curl -fsS -H 'Host: 127.0.0.1' "http://127.0.0.1:8410$1" 2>/dev/null; }
+          teardown() {
+            docker compose -f examples/basic/compose.yml -f e2e/serve.override.yml -p devlease-it-e2e-serve down -v --remove-orphans || true
+            docker compose -f e2e/fixtures/demo-a/compose.yml -p devlease-it-demo-a down -v --remove-orphans || true
+            docker compose -f e2e/fixtures/demo-b/compose.yml -p devlease-it-demo-b down -v --remove-orphans || true
+          }
+          # Tear down only when the setup fails; on success the specs
+          # need the stacks, and the final step tears everything down.
+          trap 'rc=$?; [ "$rc" -eq 0 ] || teardown' EXIT
+          docker compose -f examples/basic/compose.yml -f e2e/serve.override.yml -p devlease-it-e2e-serve up -d --wait
+          docker compose -f e2e/fixtures/demo-a/compose.yml -p devlease-it-demo-a up -d --wait
+          docker compose -f e2e/fixtures/demo-b/compose.yml -p devlease-it-demo-b up -d --wait
+          # Wait until the first sweep grants both demo leases: the
+          # listing links the stacks. Grep the link, not the bare name:
+          # the name alone appears in log lines and headers too.
+          found=0
+          for _ in $(seq 1 30); do
+            page=$(dashboard /) || { sleep 2; continue; }
+            if echo "$page" | grep -q 'href="/stacks/devlease-it-demo-a"' && echo "$page" | grep -q 'href="/stacks/devlease-it-demo-b"'; then
+              echo "the dashboard lists both demo stacks"
+              found=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$found" != 1 ]; then
+            docker compose -f examples/basic/compose.yml -f e2e/serve.override.yml -p devlease-it-e2e-serve logs
+            exit 1
+          fi
+          # Put demo-b into its stopped state for the remove flow: stop
+          # its containers, release every claim and wait one sweep for
+          # the stop to be recorded.
+          docker compose -f e2e/fixtures/demo-b/compose.yml -p devlease-it-demo-b stop
+          docker exec "$(serve_container)" dev-lease release devlease-it-demo-b --all
+          found=0
+          for _ in $(seq 1 30); do
+            page=$(dashboard /stacks/devlease-it-demo-b) || { sleep 2; continue; }
+            if echo "$page" | grep -q 'badge[^>]*>stopped<'; then
+              echo "the dashboard shows demo-b stopped"
+              found=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$found" != 1 ]; then
+            docker compose -f examples/basic/compose.yml -f e2e/serve.override.yml -p devlease-it-e2e-serve logs
+            exit 1
+          fi
+          docker compose -f examples/basic/compose.yml -f e2e/serve.override.yml -p devlease-it-e2e-serve logs
+      - name: dashboard specs
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test
+      - name: upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-screenshots
+          path: e2e/shots/
+          if-no-files-found: ignore
+      - name: tear everything down and confirm nothing is left
+        if: always()
+        env:
+          DEV_LEASE_PROJECTS: devlease-it-demo-*
+        run: |
+          set -e
+          docker compose -f examples/basic/compose.yml -f e2e/serve.override.yml -p devlease-it-e2e-serve down -v --remove-orphans || true
+          docker compose -f e2e/fixtures/demo-a/compose.yml -p devlease-it-demo-a down -v --remove-orphans || true
+          docker compose -f e2e/fixtures/demo-b/compose.yml -p devlease-it-demo-b down -v --remove-orphans || true
+          docker rmi devlease-it-e2e:local || true
+          # Nothing devlease-it may survive the teardown: containers by
+          # their project label, volumes and networks by name.
+          left=$(docker ps -a --format '{{.Label "com.docker.compose.project"}}'; docker volume ls --format '{{.Name}}'; docker network ls --format '{{.Name}}')
+          if echo "$left" | grep -q '^devlease-it-'; then
+            echo "devlease-it objects left on the daemon:" >&2
+            echo "$left" | grep '^devlease-it-' >&2
+            exit 1
+          fi
+          echo "no devlease-it objects left on the daemon"

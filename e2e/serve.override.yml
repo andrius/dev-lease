@@ -1,0 +1,5 @@
+# The e2e serve overrides examples/basic/compose.yml: the freshly built
+# local image instead of the ghcr.io tag the example pins.
+services:
+  dev-lease:
+    image: devlease-it-e2e:local

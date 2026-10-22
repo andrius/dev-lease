@@ -1,0 +1,483 @@
+/* IBM Plex, self-hosted so the CSP's default-src 'self' holds. */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/static/fonts/IBMPlexMono-Regular-Latin1.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/static/fonts/IBMPlexMono-Medium-Latin1.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/static/fonts/IBMPlexSans-Regular-Latin1.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/static/fonts/IBMPlexSans-Medium-Latin1.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/static/fonts/IBMPlexSans-SemiBold-Latin1.woff2') format('woff2');
+}
+
+/*
+ * Tokens: the mockup's light and dark values, verbatim. The bare :root
+ * holds the light values; dark applies when the system prefers dark and
+ * the visitor has not chosen light explicitly, or always under
+ * data-theme="dark". Signal Indigo is the accent; every color is an hsl value from the mockup.
+ */
+:root {
+  color-scheme: light;
+  --bg: hsl(210 20% 98%);
+  --card: hsl(220 30% 99%);
+  --ink: hsl(222 47% 11%);
+  --muted: hsl(210 40% 96%);
+  --muted-fg: hsl(215 16% 45%);
+  --border: hsl(214 32% 91%);
+  --fill: hsl(239 84% 60%);
+  --fill-hover: hsl(238 67% 54%);
+  --link: hsl(239 84% 58%);
+  --on-fill: hsl(0 0% 100%);
+  --ok: hsl(142 72% 29%);
+  --ok-bg: hsl(138 76% 97%);
+  --warn: hsl(30 90% 33%);
+  --warn-bg: hsl(48 96% 95%);
+  --bad: hsl(0 72% 41%);
+  --bad-bg: hsl(0 86% 97%);
+  --bad-fill: hsl(0 72% 46%);
+  --flash-bg: hsl(150 50% 90%);
+  --flash-fg: hsl(150 55% 25%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: hsl(222 47% 11%);
+    --card: hsl(217 33% 17%);
+    --ink: hsl(210 40% 98%);
+    --muted: hsl(220 27% 14%);
+    --muted-fg: hsl(215 20% 65%);
+    --border: hsl(217 33% 25%);
+    --fill: hsl(239 84% 60%);
+    --fill-hover: hsl(238 67% 54%);
+    --link: hsl(235 89% 74%);
+    --on-fill: hsl(0 0% 100%);
+    --ok: hsl(142 69% 60%);
+    --ok-bg: hsl(142 45% 13%);
+    --warn: hsl(38 95% 62%);
+    --warn-bg: hsl(38 50% 13%);
+    --bad: hsl(0 84% 72%);
+    --bad-bg: hsl(0 45% 17%);
+    --bad-fill: hsl(0 62% 38%);
+    --flash-bg: hsl(150 40% 18%);
+    --flash-fg: hsl(150 60% 70%);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: hsl(222 47% 11%);
+  --card: hsl(217 33% 17%);
+  --ink: hsl(210 40% 98%);
+  --muted: hsl(220 27% 14%);
+  --muted-fg: hsl(215 20% 65%);
+  --border: hsl(217 33% 25%);
+  --fill: hsl(239 84% 60%);
+  --fill-hover: hsl(238 67% 54%);
+  --link: hsl(235 89% 74%);
+  --on-fill: hsl(0 0% 100%);
+  --ok: hsl(142 69% 60%);
+  --ok-bg: hsl(142 45% 13%);
+  --warn: hsl(38 95% 62%);
+  --warn-bg: hsl(38 50% 13%);
+  --bad: hsl(0 84% 72%);
+  --bad-bg: hsl(0 45% 17%);
+  --bad-fill: hsl(0 62% 38%);
+  --flash-bg: hsl(150 40% 18%);
+  --flash-fg: hsl(150 60% 70%);
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+a { color: var(--link); }
+a:hover { color: var(--fill-hover); }
+h1 { font-size: 22px; margin: 0; }
+h2 { font-size: 16px; font-weight: 600; margin: 0 0 10px; }
+p { margin: 0 0 12px; }
+p:last-child { margin-bottom: 0; }
+
+.mono { font-family: 'IBM Plex Mono', monospace; }
+.muted { color: var(--muted-fg); }
+.small { font-size: 13px; }
+.nowrap { white-space: nowrap; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.eyebrow {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; font-weight: 500;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--muted-fg);
+}
+
+.skip {
+  position: absolute; left: -9999px; top: 0;
+  background: var(--fill); color: var(--on-fill); padding: 8px 12px;
+  min-height: 44px;
+}
+.skip:focus { left: 8px; z-index: 10; }
+
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 32px;
+  border-bottom: 1px solid var(--border);
+  background: var(--muted);
+}
+.brand {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 18px; font-weight: 500;
+  color: var(--ink); text-decoration: none;
+}
+/* The theme toggle's defined style: a 44px-tall outline button. */
+.theme-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 0 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent; color: var(--ink);
+  font: inherit; cursor: pointer;
+}
+.theme-toggle:hover { background: var(--card); color: var(--ink); }
+
+main { max-width: 1200px; margin: 0 auto; padding: 28px 32px 56px; }
+main:focus { outline: none; }
+
+.flash {
+  background: var(--flash-bg); color: var(--flash-fg);
+  border: 1px solid var(--ok);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 20px;
+}
+
+/* --- all stacks: the mockup's table above 640px, cards at 640 and
+   below. Both are always in the DOM; the media query picks the view. --- */
+.topbar-main { display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; min-width: 0; }
+.page-summary { font-size: 13px; color: var(--muted-fg); margin: 0; }
+
+.table-card { padding: 0 24px 8px; }
+.stacks-table {
+  border-collapse: collapse; width: 100%;
+  font-size: 14px;
+}
+.stacks-table th, .stacks-table td {
+  text-align: left; padding: 10px 12px 10px 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.stacks-table th {
+  color: var(--muted-fg); font-size: 13px; font-weight: 500;
+  white-space: nowrap;
+}
+.stacks-table tr:last-child td { border-bottom: none; }
+.stacks-table .dots-cell { padding-right: 0; }
+
+.stack-name {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 500; font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.stack-path {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px; color: var(--muted-fg);
+  overflow-wrap: anywhere; margin-top: 2px;
+}
+.stack-cell { min-width: 180px; }
+
+.badge {
+  display: inline-block;
+  padding: 1px 10px;
+  border-radius: 999px;
+  font-size: 12px; font-weight: 500;
+}
+.badge-ok { background: var(--ok-bg); color: var(--ok); }
+.badge-warn { background: var(--warn-bg); color: var(--warn); }
+.badge-bad { background: var(--bad-bg); color: var(--bad); }
+.badge-new { background: var(--muted); color: var(--muted-fg); }
+.next { font-size: 14px; font-weight: 500; }
+.next-bad { color: var(--bad); }
+.next-at { font-size: 12px; color: var(--muted-fg); }
+
+/* The 44x44 details link the mockup uses in every row and card. */
+.dots {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; min-height: 44px;
+  border-radius: 6px;
+  color: var(--ink); text-decoration: none;
+}
+.dots:hover { background: var(--muted); color: var(--ink); }
+
+.stack-cards { display: none; }
+.stack-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 12px;
+}
+.stack-card-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.stack-card-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.stack-card-meta { font-size: 13px; }
+.stack-empty { color: var(--muted-fg); }
+.sorted-note { font-size: 13px; color: var(--muted-fg); margin-top: 14px; }
+
+/* --- one stack --- */
+.back { margin-bottom: 10px; }
+.back a {
+  display: inline-flex; align-items: center;
+  min-height: 44px;
+  font-size: 14px; text-decoration: none;
+}
+.stack-head { display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px; }
+.stack-head-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.stack-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 22px; font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.stack-sub { font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--muted-fg); margin: 0; }
+
+.grid { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.main-col { flex: 999 1 600px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.aside-col { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 18px 20px;
+  overflow-x: auto;
+}
+
+/* Containers: the mockup's table, mono uppercase heads. */
+.containers-table {
+  border-collapse: collapse; width: 100%; min-width: 560px;
+  font-size: 14px;
+}
+.containers-table th, .containers-table td {
+  text-align: left; padding: 8px 16px 10px 0;
+  vertical-align: top;
+}
+.containers-table th {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; font-weight: 500;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--muted-fg);
+  padding-top: 8px;
+}
+.containers-table tbody tr { border-top: 1px solid var(--border); }
+.containers-table th:first-child, .containers-table td:first-child { padding-left: 0; }
+.containers-table th:last-child, .containers-table td:last-child { padding-right: 0; }
+.image-ref { font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--muted-fg); overflow-wrap: anywhere; }
+.containers-card .card-head { margin: 0 0 8px; }
+
+.container-cards { display: none; }
+.cont-card {
+  display: flex; justify-content: space-between; gap: 12px;
+  font-size: 14px;
+  padding-top: 8px; border-top: 1px solid var(--border);
+}
+.cont-card-main { min-width: 0; }
+.cont-card-side { text-align: right; white-space: nowrap; }
+
+.tag {
+  font-size: 11px; color: var(--ok);
+  border: 1px solid var(--ok); border-radius: 999px;
+  padding: 0 6px; margin-left: 4px;
+}
+
+/* Logs: on the muted background like the mockup, select in the header. */
+.logs-card { background: var(--muted); }
+.logs-card h2 { margin: 0; }
+.logs-form {
+  display: flex; justify-content: space-between; gap: 12px; align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.logs-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted-fg); }
+select, input[type="text"], input[type="password"] {
+  min-height: 44px; padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg); color: var(--ink);
+  font: inherit;
+}
+.logs-form select { background: var(--card); }
+.logs {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin: 0;
+  max-height: 420px;
+  overflow: auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.log-time { color: var(--muted-fg); }
+
+/* Volumes and images: the mockup's two-column split. */
+.vol-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; font-size: 14px; }
+.vol-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.vol-row { display: flex; justify-content: space-between; gap: 12px; }
+
+/* Lease: eyebrow, the big number, the stops line, holders with times. */
+.lease-left { font-size: 32px; font-weight: 600; line-height: 1.1; margin: 0; }
+.lease-line { font-size: 14px; color: var(--muted-fg); margin: 0; }
+.hosts {
+  list-style: none; margin: 0; padding: 6px 0 0;
+  border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 14px;
+}
+.host { display: flex; justify-content: space-between; gap: 12px; }
+.host .muted { color: var(--muted-fg); }
+
+/* Actions: Keep for at least + Keep, the full-width release, the split
+   stop and remove links, as in the mockup. */
+.extend-form { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.extend-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted-fg); }
+.extend-form select { background: var(--card); }
+.extend-form .btn { flex: 1; }
+.release-form { display: flex; }
+.release-form .btn { width: 100%; }
+.actions-row { display: flex; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+.actions-row .btn { flex: 1; }
+
+/* Start again: plain on a wide screen (the header carries the path),
+   a card with the path row on a phone. */
+.start-again { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted-fg); }
+.start-again .cmd { background: transparent; border: none; padding: 0; margin: 0; color: var(--ink); }
+.where-path { display: none; }
+.cmd {
+  display: block;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  margin: 6px 0;
+}
+
+/* --- buttons --- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 0 16px;
+  border-radius: 6px;
+  border: 1px solid var(--fill);
+  background: var(--fill); color: var(--on-fill);
+  font: inherit; font-weight: 500;
+  text-decoration: none; cursor: pointer;
+}
+.btn:hover { background: var(--fill-hover); color: var(--on-fill); }
+.btn-outline { background: var(--card); color: var(--ink); border-color: var(--border); }
+.btn-outline:hover { background: var(--muted); color: var(--ink); }
+.btn-warn { background: transparent; color: var(--warn); border-color: var(--warn); }
+.btn-warn:hover { background: var(--warn-bg); color: var(--warn); }
+.btn-bad-outline { background: transparent; color: var(--bad); border-color: var(--bad); }
+.btn-bad-outline:hover { background: var(--bad-bg); color: var(--bad); }
+.btn-bad { border-color: var(--bad-fill); background: var(--bad-fill); }
+.btn-bad:hover { background: var(--bad); border-color: var(--bad); }
+.btn:disabled, .btn-outline:disabled, .btn-bad-outline:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* --- dialogs (rendered as pages; no JS) --- */
+/* A closed native dialog must take no space at all; the flex layout
+   applies only to a dialog that is open. */
+dialog:not([open]) { display: none; }
+.dialog[open] {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 24px;
+  box-sizing: border-box;
+  width: calc(100vw - 32px);
+  max-width: 640px;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  inset: 0;
+  margin: auto;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.dialog::backdrop { background: hsl(222 47% 11% / 0.6); }
+.dialog h2 { font-size: 19px; }
+.bad-text { color: var(--bad); }
+.warn-text { color: var(--warn); }
+.dialog-body { display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.rm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; font-size: 14px; }
+.rm-confirm { display: flex; flex-direction: column; gap: 8px; }
+.rm-confirm input { max-width: 420px; }
+.cmd-box { background: var(--bg); border-radius: 6px; padding: 10px 12px; font-size: 13px; }
+.cmd-box .cmd { border: none; padding: 2px 0; margin: 0; background: transparent; }
+
+/* --- login and error --- */
+.login, .error { max-width: 420px; margin: 60px auto; }
+.error a {
+  display: inline-flex; align-items: center;
+  min-height: 44px;
+  text-decoration: none;
+}
+.login-form { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.login-form label { font-size: 13px; color: var(--muted-fg); }
+
+/* --- phone --- */
+@media (max-width: 640px) {
+  .topbar { padding: 10px 16px; }
+  main { padding: 16px 16px 32px; }
+
+  .table-card { display: none; }
+  .stack-cards { display: flex; flex-direction: column; gap: 10px; }
+
+  .grid { flex-direction: column; }
+  .aside-col { order: -1; width: 100%; }
+  .main-col { width: 100%; }
+  /* The mockup's phone order: containers, volumes, then logs last. */
+  .logs-card { order: 3; }
+
+  .card { padding: 16px; }
+  .table-wrap { display: none; }
+  .container-cards { display: flex; flex-direction: column; gap: 10px; list-style: none; margin: 0; padding: 0; }
+
+  .start-again { gap: 10px; font-size: 14px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 16px; }
+  .where-path { display: block; }
+
+  .rm-grid { grid-template-columns: 1fr; }
+  .vol-grid { grid-template-columns: 1fr; }
+}

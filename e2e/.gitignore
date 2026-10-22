@@ -1,0 +1,6 @@
+# Local runs write screenshots, traces and dependencies here; nothing in
+# this directory is committed except the sources.
+node_modules/
+shots/
+test-results/
+playwright-report/

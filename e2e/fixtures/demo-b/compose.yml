@@ -1,0 +1,7 @@
+# Demo stack for the dashboard specs: one plain service, no policy labels.
+# The setup stops it (and releases its claims) before the specs run, so
+# the remove flow has a stopped stack to remove.
+services:
+  web:
+    image: busybox
+    command: ["sleep", "infinity"]

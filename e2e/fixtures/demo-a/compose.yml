@@ -1,0 +1,16 @@
+# Demo stack for the dashboard specs: one kept service on its own volume
+# and one plain service. The stop flow keeps the first running; the volume
+# stays in place until the project is torn down.
+services:
+  web:
+    image: busybox
+    command: ["sleep", "infinity"]
+  kept:
+    image: busybox
+    command: ["sleep", "infinity"]
+    labels:
+      dev-lease.keep: "true"
+    volumes:
+      - kept-data:/data
+volumes:
+  kept-data:

@@ -1,0 +1,4 @@
+# Start the current worktree's compose project and extend its lease.
+# The recipe passes the ttl through: `just up 45m`.
+up ttl="2h":
+	./up.sh "{{ttl}}"

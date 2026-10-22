@@ -1,0 +1,35 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{{if eq .Mode "stack"}}<title>dev-lease: {{.D.Name}}</title>{{else if eq .Mode "login"}}<title>dev-lease: log in</title>{{else if eq .Mode "error"}}<title>dev-lease: {{.StatusText}}</title>{{else}}<title>dev-lease: all stacks</title>{{end}}
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/theme.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar">
+<div class="topbar-main">
+<a class="brand" href="/">dev-lease</a>
+{{if eq .Mode "stacks"}}<p class="page-summary">{{.Summary}}</p>{{end}}
+</div>
+{{template "theme-toggle" .}}
+</header>
+<main id="main" tabindex="-1">
+{{if .Flash}}<div class="flash" role="status">{{.Flash}}</div>{{end}}
+{{if eq .Mode "stack"}}{{template "main-stack" .}}{{else if eq .Mode "login"}}{{template "main-login" .}}{{else if eq .Mode "error"}}{{template "main-error" .}}{{else}}{{template "main-stacks" .}}{{end}}
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
+{{end}}
+{{define "theme-toggle"}}<button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle theme">Theme</button>{{end}}
+{{define "hosts"}}<ul class="hosts">{{range .Page.Holders}}
+<li class="host"><span class="mono">{{.Name}}</span><span class="muted">until {{.Until}} UTC</span></li>
+{{end}}</ul>{{end}}
+{{define "start-again"}}<section class="start-again" aria-label="Start again">
+<div class="where-path"><div class="muted small">Path</div><div class="mono path-line">{{.D.Path}}</div></div>
+<div><div>Start it again from its directory</div><code class="cmd">{{.D.StartCommand}}</code></div>
+</section>{{end}}

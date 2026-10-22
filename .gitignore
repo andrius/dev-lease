@@ -1,0 +1,18 @@
+# Build output
+/dev-lease
+/cmd/dev-lease/dev-lease
+/dist/
+*.test
+*.out
+coverage.*
+
+# An operator's .env next to an example compose file holds machine-specific
+# values; never track one. The .env.example files are documentation.
+.env
+.env.*
+!*.example
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,8 @@
+{{define "page-error"}}{{template "layout" .}}{{end}}
+
+{{define "main-error"}}<div class="error">
+<h1>{{.Status}} {{.StatusText}}</h1>
+<p>{{.Message}}</p>
+<a href="/">Back to the stacks</a>
+</div>
+{{end}}

@@ -1,0 +1,52 @@
+# Example: dev-lease serve that exits when idle (for laptops).
+#
+# Like examples/basic, but with restart "no" and --exit-when-idle=true:
+# serve exits once no managed project has a live lease or a running
+# container that is not kept and, with a removal delay above 0, nothing stopped is waiting
+# for removal, so a laptop can sleep without a docker service keeping it
+# awake. The dashboard is on 8410 as in examples/basic.
+#
+# The operator's variables live in a .env file next to this compose file:
+# Compose reads .env from the compose file's directory, so nothing needs
+# to be set inline in the command. Copy .env.example to .env and edit it.
+# DEV_LEASE_PROJECTS is required: every compose command against this file
+# (up, down, logs, ...) fails without it.
+#   docker compose -p dev-lease -f examples/on-demand/compose.yml up -d --no-recreate --wait
+services:
+  dev-lease:
+    image: ghcr.io/andrius/dev-lease:v0.1.0
+    labels:
+      dev-lease.role: server
+    command:
+      - serve
+      - --projects
+      - ${DEV_LEASE_PROJECTS:?set DEV_LEASE_PROJECTS to the comma-separated managed patterns}
+      - --interval
+      - ${DEV_LEASE_INTERVAL:-1m}
+      - --default-ttl
+      - 2h
+      - --remove-after
+      - ${DEV_LEASE_REMOVE_AFTER:-168h}
+      - --stop-timeout
+      - 10s
+      - --state
+      - /data/leases.json
+      - --socket
+      - /var/run/docker.sock
+      - --exit-when-idle=true
+      - --dashboard
+      - :8410
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - dev-lease-state:/data
+    environment:
+      # The token is an environment variable only, never a flag; unset
+      # means no login.
+      DEV_LEASE_DASHBOARD_TOKEN: ${DEV_LEASE_DASHBOARD_TOKEN:-}
+      DEV_LEASE_DASHBOARD_HOSTS: "${DEV_LEASE_DASHBOARD_HOSTS:-localhost,127.0.0.1,[::1]}"
+    ports:
+      - "${DEV_LEASE_DASHBOARD_BIND:-127.0.0.1}:8410:8410"
+    restart: "no"
+
+volumes:
+  dev-lease-state:

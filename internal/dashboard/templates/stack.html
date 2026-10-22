@@ -1,0 +1,162 @@
+{{define "page-stack"}}{{template "layout" .}}{{end}}
+
+{{define "main-stack"}}
+<nav class="back"><a href="/">&larr; all stacks</a></nav>
+<header class="stack-head">
+<div class="stack-head-row"><h1 class="stack-title mono">{{.D.Name}}</h1><span class="badge badge-{{badge .D.State}}">{{.D.State}}</span></div>
+{{if .D.Path}}<p class="stack-sub"><span class="mono">{{.D.Path}}</span>{{if .D.ConfigFiles}} · {{range $i, $f := .D.ConfigFiles}}{{if $i}}, {{end}}<span class="mono">{{$f}}</span>{{end}}{{end}}</p>{{end}}
+</header>
+{{if .Page.Confirm}}<nav class="back"><a href="/stacks/{{path .D.Name}}">close the dialog</a></nav>{{end}}
+<div class="grid" data-refresh-url="{{.FragmentURL}}">
+<div class="main-col">
+<div class="frag" id="frag-containers">{{template "containers" .}}</div>
+<section class="card logs-card" aria-label="Logs">
+{{template "logs-controls" .}}
+<div class="frag" id="frag-logs">{{template "logs-out" .}}</div>
+</section>
+<div class="frag" id="frag-volumes">{{template "volumes" .}}</div>
+</div>
+<div class="aside-col">
+<div class="frag" id="frag-lease">{{template "lease" .}}</div>
+{{template "actions" .}}
+{{template "start-again" .}}
+</div>
+</div>
+{{template "stop-confirm" .}}
+{{template "remove-confirm" .}}
+{{end}}
+
+{{define "stack-frag"}}
+<div class="frag" id="frag-containers">{{template "containers" .}}</div>
+<div class="frag" id="frag-logs">{{template "logs-out" .}}</div>
+<div class="frag" id="frag-volumes">{{template "volumes" .}}</div>
+<div class="frag" id="frag-lease">{{template "lease" .}}</div>
+{{end}}
+
+{{define "containers"}}<section class="card containers-card" aria-label="Containers">
+<h2>Containers</h2>
+{{if .D.Containers}}<div class="table-wrap"><table class="containers-table">
+<thead><tr><th scope="col">Service</th><th scope="col">State</th><th scope="col">Up</th><th scope="col">Memory</th><th scope="col">Image</th></tr></thead>
+<tbody>{{range .D.Containers}}<tr>
+<td><span class="mono">{{.Service}}</span>{{if .Kept}} <span class="tag">keep</span>{{end}}</td>
+<td>{{.State}}</td>
+<td class="nowrap">{{if eq .State "running"}}up {{fmtDur .Up}}{{else}}-{{end}}</td>
+<td class="nowrap">{{if eq .MemoryBytes -1}}-{{else}}{{fmtSize .MemoryBytes}}{{end}}</td>
+<td class="image-ref">{{.Image}}</td>
+</tr>{{end}}</tbody>
+</table></div>
+<ul class="container-cards">{{range .D.Containers}}<li class="cont-card">
+<div class="cont-card-main"><div class="mono">{{.Service}}{{if .Kept}} <span class="tag">keep</span>{{end}}</div><div class="muted image-ref">{{.Image}}</div></div>
+<div class="cont-card-side"><div>{{.State}}{{if eq .State "running"}}, up {{fmtDur .Up}}{{end}}</div><div class="muted">{{if eq .MemoryBytes -1}}-{{else}}{{fmtSize .MemoryBytes}}{{end}}</div></div>
+</li>{{end}}</ul>
+{{else}}<p class="muted">No containers.</p>{{end}}
+</section>{{end}}
+
+{{define "logs-controls"}}<form class="logs-form" method="get" action="/stacks/{{path .D.Name}}">
+<h2>Logs</h2>
+<label>Service
+<select name="logs">{{range .Services}}<option value="{{.}}"{{if eq . $.D.LogService}} selected{{end}}>{{.}}</option>{{end}}</select>
+</label>
+<label>Lines
+<select name="lines">{{range $n := .LogLineOptions}}<option value="{{$n}}"{{if eq $n $.LogLines}} selected{{end}}>{{$n}}</option>{{end}}</select>
+</label>
+<button class="btn" type="submit">Show logs</button>
+</form>
+{{end}}
+
+{{define "logs-out"}}{{if .D.LogService}}<p class="muted small">times in UTC</p><pre class="logs" aria-label="Logs of {{.D.LogService}}">{{range .D.Logs}}<span class="log-time">{{logTime .Time}}</span> <span class="mono">{{.Text}}</span>
+{{end}}{{if not .D.Logs}}<span class="muted">no logs for {{.D.LogService}}</span>{{end}}</pre>
+{{else}}<p class="muted">Choose a service to see its logs.</p>{{end}}
+{{end}}
+
+{{define "volumes"}}<section class="card" aria-label="Volumes and images">
+<div class="vol-grid">
+<div class="vol-col">
+<h2>Volumes</h2>
+{{if .D.Volumes}}{{range .D.Volumes}}<div class="vol-row"><span class="mono">{{.Name}}</span><span class="nowrap">{{if eq .Bytes -1}}unknown{{else}}{{fmtSize .Bytes}}{{end}}{{if .Kept}} · keep{{end}}</span></div>{{end}}
+{{else}}<div class="muted">No volumes.</div>{{end}}
+</div>
+<div class="vol-col">
+<h2>Images</h2>
+<div>Removed with the stack: {{if .D.RemovedImages}}<span class="mono">{{join .D.RemovedImages ", "}}</span>{{else}}none{{end}}.</div>
+<div class="muted">Left in place: {{if .D.KeptImages}}<span class="mono">{{join .D.KeptImages ", "}}</span> (pulled, kept){{else}}none{{end}}{{if .D.Networks}} · networks {{join .D.Networks ", "}} are removed{{end}}.</div>
+</div>
+</div>
+</section>{{end}}
+
+{{define "lease"}}<section class="card" aria-label="Lease">
+<div class="eyebrow">Lease</div>
+<p class="lease-left">{{.Page.LeaseLeft}}</p>
+{{if or (eq .D.State "live") (eq .D.State "new")}}
+<p class="lease-line">{{if .D.NextAt}}Stops at {{clock .D.NextAt}}. {{end}}{{if .Page.NeverRemove}}It is never removed.{{else}}Removed {{fmtDur .Page.RemoveAfter}} after it stops.{{end}}</p>
+{{else}}<p class="lease-line">Next: {{if eq .D.Next "removal overdue"}}removed at the next sweep{{else}}{{.D.Next}}{{end}}.</p>{{end}}
+{{if .Page.Holders}}{{template "hosts" .}}{{end}}
+</section>{{end}}
+
+{{define "actions"}}<section class="card" aria-label="Actions">
+<form method="post" action="/stacks/{{path .D.Name}}/keep" class="extend-form">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label>Keep for at least
+<select name="ttl">
+<option value="2h" selected>2h</option>
+<option value="8h">8h</option>
+<option value="1d">1d</option>
+<option value="7d">7d</option>
+</select>
+</label>
+<button class="btn" type="submit">Keep</button>
+</form>
+{{if .Page.DashHolds}}<form method="post" action="/stacks/{{path .D.Name}}/release" class="release-form">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<button class="btn btn-outline" type="submit">Release my claim</button>
+</form>
+{{end}}
+<div class="actions-row">
+{{if or (eq .D.State "live") (eq .D.State "new")}}<a class="btn btn-warn" href="/stacks/{{path .D.Name}}?confirm=stop" data-dialog="stop-dialog">Stop…</a>{{end}}
+<a class="btn btn-bad-outline" href="/stacks/{{path .D.Name}}?confirm=remove" data-dialog="remove-dialog">Remove…</a>
+</div>
+</section>{{end}}
+
+{{define "stop-confirm"}}<dialog class="dialog" id="stop-dialog"{{if eq .Page.Confirm "stop"}} open{{end}} aria-labelledby="stop-title">
+<h2 id="stop-title">Stop <span class="mono">{{.D.Name}}</span>?</h2>
+<div class="dialog-body">
+{{if .D.Plan.Stop}}<p>Stops {{len .D.Plan.Stop}} running container{{if gt (len .D.Plan.Stop) 1}}s{{end}}: <span class="mono">{{join .D.Plan.Stop ", "}}</span>.</p>{{else}}<p>There is nothing to stop.</p>{{end}}
+{{if .Page.KeptRunning}}<p>Keeps running (dev-lease.keep): <span class="mono">{{join .Page.KeptRunning ", "}}</span>.</p>{{end}}
+<p>Nothing is deleted. {{if .Page.NeverRemove}}The stack is never removed.{{else if eq .D.State "stopped"}}{{if le .Page.StopAfter 0}}The stack is removed at the next sweep unless someone starts it again or extends its lease.{{else}}The stack is removed in {{fmtDur .Page.StopAfter}} unless someone starts it again or extends its lease.{{end}}{{else}}The stack is removed {{fmtDur .Page.StopAfter}} after it stops unless someone starts it again or extends its lease.{{end}}</p>
+{{if .Page.Holders}}<p class="warn-text">{{if eq (len .Page.Holders) 1}}<span class="mono">{{(index .Page.Holders 0).Name}}</span> holds the lease for {{fmtDur (index .Page.Holders 0).Remaining}} more. Stopping ends it for every holder.{{else}}{{range $i, $h := .Page.Holders}}{{if $i}}, {{end}}<span class="mono">{{$h.Name}}</span>{{end}} hold the lease. Stopping ends it for every holder.{{end}}</p>{{end}}
+<div class="cmd-box"><div class="muted">To start it again</div><code class="cmd">{{.D.StartCommand}}</code></div>
+</div>
+<div class="dialog-actions">
+<a class="btn btn-outline dialog-cancel" href="/stacks/{{path .D.Name}}">Cancel</a>
+<form method="post" action="/stacks/{{path .D.Name}}/stop" class="inline">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<button class="btn" type="submit">Stop the stack</button>
+</form>
+</div>
+</dialog>{{end}}
+
+{{define "remove-confirm"}}<dialog class="dialog" id="remove-dialog"{{if eq .Page.Confirm "remove"}} open{{end}} aria-labelledby="rm-title">
+<h2 id="rm-title" class="bad-text">Remove <span class="mono">{{.D.Name}}</span>?</h2>
+<div class="dialog-body">
+{{if or (eq .D.State "live") (eq .D.State "new")}}<p>This stops the stack first.</p>{{end}}
+<p>This deletes the stack now. It cannot be undone.</p>
+<div class="rm-grid">
+<div><div class="muted small">Containers</div>{{if .D.Plan.Containers}}<div class="mono">{{join .D.Plan.Containers ", "}}</div>{{else}}<div class="muted">none</div>{{end}}</div>
+<div><div class="muted small">Networks</div>{{if .D.Plan.Networks}}<div class="mono">{{join .D.Plan.Networks ", "}}</div>{{else}}<div class="muted">none</div>{{end}}</div>
+<div><div class="muted small">Volumes, with their data</div>{{if .D.Plan.Volumes}}<div>{{range .D.Plan.Volumes}}<div><span class="mono">{{.}}</span> {{volSize $.D .}}</div>{{end}}</div>{{else}}<div class="muted">none</div>{{end}}</div>
+<div><div class="muted small">Images</div>{{if .D.Plan.Images}}<div class="mono">{{join .D.Plan.Images ", "}}</div>{{else}}<div class="muted">none</div>{{end}}</div>
+</div>
+<p class="muted small">Left in place: {{if .Page.LeftInPlace}}<span class="mono">{{join .Page.LeftInPlace ", "}}</span>{{else}}none{{end}}.</p>
+{{if .Page.NeverRemove}}<p class="warn-text">This stack is marked never remove; removing it anyway needs an override.</p>{{end}}
+<form method="post" action="/stacks/{{path .D.Name}}/remove" class="rm-confirm">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+{{if .Page.NeverRemove}}<input type="hidden" name="override" value="1">{{end}}
+<label for="rm-confirm" class="muted small">Type the stack name to confirm</label>
+<input id="rm-confirm" name="confirm" type="text" placeholder="{{.D.Name}}" autocomplete="off">
+<div class="dialog-actions">
+<a class="btn btn-outline dialog-cancel" href="/stacks/{{path .D.Name}}">Cancel</a>
+<button class="btn btn-bad" type="submit">Remove the stack</button>
+</div>
+</form>
+</div>
+</dialog>{{end}}

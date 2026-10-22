@@ -1,0 +1,13 @@
+{{define "page-login"}}{{template "layout" .}}{{end}}
+
+{{define "main-login"}}<div class="login">
+<h1>dev-lease</h1>
+<p class="muted">The dashboard is behind a token. Type it to get a session cookie.</p>
+<form method="post" action="/login" class="login-form">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label for="token">Token</label>
+<input id="token" name="token" type="password" autocomplete="current-password">
+<button class="btn" type="submit">Log in</button>
+</form>
+</div>
+{{end}}

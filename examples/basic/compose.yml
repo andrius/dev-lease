@@ -1,0 +1,61 @@
+# Example: run dev-lease serve next to the projects it manages.
+#
+# The operator's variables (DEV_LEASE_PROJECTS and friends) live in a
+# .env file next to this compose file: Compose reads .env from the compose
+# file's directory, so nothing needs to be set inline in the command.
+# Copy .env.example to .env and edit it. DEV_LEASE_PROJECTS is required:
+# every compose command against this file (up, down, logs, ...) fails
+# without it.
+#   docker compose -p dev-lease -f examples/basic/compose.yml up -d --no-recreate --wait
+#
+# A worktree layout (one checkout per branch) works with a wildcard in
+# .env's DEV_LEASE_PROJECTS over the derived <repo>-<worktree> names:
+#   DEV_LEASE_PROJECTS='myapp-*'
+# examples/worktrees has the ready-made up.sh and justfile for that.
+#
+# The state volume must stay mounted as long as dev-lease runs; removing it
+# forgets every lease: the next serve pass treats every managed project on
+# the daemon as newly arrived and grants it a fresh default lease, and
+# stopped stacks lose their stopped time, so their removal clock restarts.
+#
+# The dashboard listens on 8410 inside the container; the port is
+# published on the host interface DEV_LEASE_DASHBOARD_BIND names (default:
+# 127.0.0.1 only). The Host allowlist and the optional login token come
+# from DEV_LEASE_DASHBOARD_HOSTS and DEV_LEASE_DASHBOARD_TOKEN.
+services:
+  dev-lease:
+    image: ghcr.io/andrius/dev-lease:v0.1.0
+    labels:
+      dev-lease.role: server
+    command:
+      - serve
+      - --projects
+      - ${DEV_LEASE_PROJECTS:?set DEV_LEASE_PROJECTS to the comma-separated managed patterns}
+      - --interval
+      - ${DEV_LEASE_INTERVAL:-1m}
+      - --default-ttl
+      - 2h
+      - --remove-after
+      - ${DEV_LEASE_REMOVE_AFTER:-168h}
+      - --stop-timeout
+      - 10s
+      - --state
+      - /data/leases.json
+      - --socket
+      - /var/run/docker.sock
+      - --dashboard
+      - :8410
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - dev-lease-state:/data
+    environment:
+      # The token is an environment variable only, never a flag; unset
+      # means no login.
+      DEV_LEASE_DASHBOARD_TOKEN: ${DEV_LEASE_DASHBOARD_TOKEN:-}
+      DEV_LEASE_DASHBOARD_HOSTS: "${DEV_LEASE_DASHBOARD_HOSTS:-localhost,127.0.0.1,[::1]}"
+    ports:
+      - "${DEV_LEASE_DASHBOARD_BIND:-127.0.0.1}:8410:8410"
+    restart: unless-stopped
+
+volumes:
+  dev-lease-state:

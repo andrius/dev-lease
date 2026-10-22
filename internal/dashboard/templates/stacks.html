@@ -1,0 +1,48 @@
+{{define "page-stacks"}}{{template "layout" .}}{{end}}
+
+{{define "main-stacks"}}
+{{template "stacks-frag" .}}
+<p class="sorted-note">Sorted by what happens next. Only stacks matching <span class="mono">{{.Patterns}}</span> are shown.</p>
+{{end}}
+
+{{define "stacks-frag"}}<div class="stacks" data-refresh-url="{{.FragmentURL}}">
+{{template "stacks" .}}
+</div>
+{{end}}
+
+{{define "stacks"}}{{if .Stacks}}
+<section class="card table-card" aria-label="Stacks">
+<table class="stacks-table">
+<thead><tr>
+<th scope="col">Stack</th>
+<th scope="col">State</th>
+<th scope="col">Next</th>
+<th scope="col">Containers</th>
+<th scope="col">Disk</th>
+<th scope="col">Held by</th>
+<th scope="col"><span class="visually-hidden">Details</span></th>
+</tr></thead>
+<tbody>
+{{range .Stacks}}<tr class="stack-row" data-stack="{{.Name}}">
+<td class="stack-cell"><div class="stack-name mono">{{.Name}}</div>{{if .Path}}<div class="stack-path">{{.Path}}</div>{{end}}</td>
+<td class="nowrap"><span class="badge badge-{{.Badge}}">{{.State}}</span></td>
+<td class="nowrap"><div class="next{{if .NextBad}} next-bad{{end}}">{{if .NextTimeAttr}}<time datetime="{{.NextTimeAttr}}">{{end}}{{.Next}}{{if .NextTimeAttr}}</time>{{end}}</div>{{if .NextAtText}}<div class="next-at">{{.NextAtText}}</div>{{end}}</td>
+<td class="nowrap">{{.Containers}}</td>
+<td class="nowrap">{{.Disk}}</td>
+<td>{{.HeldBy}}</td>
+<td class="dots-cell"><a class="dots" href="/stacks/{{path .Name}}" aria-label="Details of {{.Name}}"><svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" focusable="false"><circle cx="4" cy="10" r="1.8"></circle><circle cx="10" cy="10" r="1.8"></circle><circle cx="16" cy="10" r="1.8"></circle></svg></a></td>
+</tr>{{end}}
+</tbody>
+</table>
+</section>
+<div class="stack-cards">
+{{range .Stacks}}<article class="stack-card" data-stack="{{.Name}}">
+<div class="stack-card-main">
+<div class="stack-name mono">{{.Name}}</div>
+<div class="stack-card-row"><span class="badge badge-{{.Badge}}">{{.State}}</span><span class="next{{if .NextBad}} next-bad{{end}}">{{.Next}}</span></div>
+<div class="stack-card-meta muted">{{.Containers}} · {{.Disk}}{{if ne .HeldBy "-"}} · held by {{.HeldBy}}{{end}}</div>
+</div>
+<a class="dots" href="/stacks/{{path .Name}}" aria-label="Details of {{.Name}}"><svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" focusable="false"><circle cx="4" cy="10" r="1.8"></circle><circle cx="10" cy="10" r="1.8"></circle><circle cx="16" cy="10" r="1.8"></circle></svg></a>
+</article>{{end}}
+</div>
+{{else}}<p class="stack-empty muted">No managed stacks. Once a compose project matches <span class="mono">{{$.Patterns}}</span>, it shows up here.</p>{{end}}{{end}}
