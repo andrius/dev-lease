@@ -126,9 +126,11 @@ func TestRemovalOfASharedUnlabelledImage(t *testing.T) {
 
 // A stack taken down with `docker compose down` after its stop, with no
 // named volume: only its unlabelled built image is left on the daemon.
-// The image keeps the stopped stack present, like a labelled built image
-// does under Compose v5, so the removal deletes it at the removal time
-// instead of the lease being dropped and the image left behind.
+// The image counts as presence, like a labelled built image does under
+// Compose v5, so it is deleted by a removal - and since no container and
+// no volume is left, the torn-down rule (2026-10-28) runs that removal on
+// the very next pass, before the deadline, instead of dropping the lease
+// and leaving the image behind.
 func TestStoppedStackStaysWhileItsUnlabelledBuiltImageRemains(t *testing.T) {
 	h := newHarness(t)
 	h.srv.AddContainerWithUses("c1", "myapp-web-1", map[string]string{
@@ -143,16 +145,7 @@ func TestStoppedStackStaysWhileItsUnlabelledBuiltImageRemains(t *testing.T) {
 	h.srv.Drop("container", "c1") // compose down
 	h.srv.Drop("network", "n1")
 
-	h.pass(t)
-	if l, ok := h.leases()["myapp"]; !ok || l.State != lease.StateStopped {
-		t.Fatalf("lease after the compose down = %+v (present %v), want it still stopped", l, ok)
-	}
-	if !h.srv.Has("image", "sha256:unlab") {
-		t.Fatal("setup: the built image is gone before the removal")
-	}
-
-	h.ageStopped(t)
-	rep := h.pass(t)
+	rep := h.pass(t) // the torn-down rule: removed now, no deadline wait
 	if !slices.Equal(rep.Removed, []string{"myapp"}) {
 		t.Fatalf("Removed = %v, want [myapp]", rep.Removed)
 	}

@@ -1,7 +1,9 @@
 // Package reaper runs one dev-lease pass: managed projects without a lease
 // get the default lease, a project whose lease expired is stopped (its
 // containers, nothing else), and a stopped project is removed from the
-// daemon once its effective removal delay has passed. A removal runs in exactly one
+// daemon once its effective removal delay has passed, or at once when its
+// stack was already torn down (no containers and no volumes left on the
+// daemon). A removal runs in exactly one
 // pass: what to remove is decided from the daemon at removal time, by the
 // label, and the lease is deleted whatever the outcome.
 package reaper
@@ -383,56 +385,74 @@ func PassWith(ctx context.Context, cli *docker.Client, st lease.Store, cfg Confi
 	// its effective removal delay (lease.EffectiveRemovalDelay: a 0 from the
 	// lease or from serve wins, a label-set delay as stored, a serve-set
 	// delay the longer of the stored and the current setting) has passed
-	// since StoppedAt;
+	// since StoppedAt, or at once when its stack was already torn down
+	// underneath the lease (an agent or the operator ran compose down -v or
+	// a test recipe's trap cleaned up: no container and no volume is left,
+	// only built images and maybe a network - never for a delay of 0);
 	// an expired project with no state is stopped. Sorted for
 	// deterministic passes and logs.
-	names := make([]string, 0, len(leases))
+	type removal struct {
+		name  string
+		force bool
+	}
+	due := make([]removal, 0, len(leases))
 	for name, l := range leases {
 		if !Managed(name, cfg) {
 			continue
 		}
 		switch {
 		case l.State == lease.StateStopped:
-			if d := l.EffectiveRemovalDelay(cfg.RemoveAfter); d > 0 && !now().Before(l.StoppedAt.Add(d)) {
-				names = append(names, name)
+			d := l.EffectiveRemovalDelay(cfg.RemoveAfter)
+			if d > 0 && !now().Before(l.StoppedAt.Add(d)) {
+				due = append(due, removal{name: name})
 				continue
 			}
 			// Nothing left on the daemon? The stopped lease has nothing to
 			// remove, so it would only keep serve from going idle until the
-			// removal deadline: drop it now.
-			empty, err := projectEmpty(ctx, cli, name, l.Services)
+			// removal deadline: drop it now. Only images or a network left?
+			// The stack was torn down: remove what is left now, through the
+			// same removal a due project gets.
+			empty, tornDown, err := projectLeftovers(ctx, cli, name, l.Services)
 			if err != nil {
 				act(log, via, now(), name, "remove", "", "", err)
 				continue
 			}
-			if !empty {
+			if empty {
+				if err := st.Update(func(m map[string]lease.Lease) error {
+					if cur, ok := m[name]; ok && cur.State == lease.StateStopped {
+						delete(m, name)
+					}
+					return nil
+				}); err != nil {
+					return rep, fmt.Errorf("drop stopped lease for %s: %w", name, err)
+				}
+				delete(leases, name)
+				rep.Removed = append(rep.Removed, name)
+				act(log, via, now(), name, "remove", "", name, nil)
 				continue
 			}
-			if err := st.Update(func(m map[string]lease.Lease) error {
-				if cur, ok := m[name]; ok && cur.State == lease.StateStopped {
-					delete(m, name)
-				}
-				return nil
-			}); err != nil {
-				return rep, fmt.Errorf("drop stopped lease for %s: %w", name, err)
+			if d <= 0 || !tornDown {
+				// A delay of 0 is never remove: the deadline never comes,
+				// and the forced removal is refused with it.
+				continue
 			}
-			delete(leases, name)
-			rep.Removed = append(rep.Removed, name)
-			act(log, via, now(), name, "remove", "", name, nil)
+			act(log, via, now(), name, "remove", "", "torn down", nil)
+			due = append(due, removal{name: name, force: true})
 		case l.State == "" && l.Expired(now()):
-			names = append(names, name)
+			due = append(due, removal{name: name})
 		}
 	}
-	sort.Strings(names)
-	for _, name := range names {
+	sort.Slice(due, func(i, j int) bool { return due[i].name < due[j].name })
+	for _, r := range due {
 		if ctx.Err() != nil {
 			// The pass was cancelled during an earlier project's action:
 			// stop before touching the later ones. Their leases stay as
 			// they were; the next pass tries them again.
 			break
 		}
+		name := r.name
 		if leases[name].State == lease.StateStopped {
-			skipped, failed, removed, err := removeProject(ctx, cli, st, name, cfg, now, log, via, false)
+			skipped, failed, removed, err := removeProject(ctx, cli, st, name, cfg, now, log, via, r.force)
 			if err != nil {
 				// Store failure: report the project and stop its removal;
 				// the lease stays as it is (a store that cannot be written
@@ -484,51 +504,73 @@ func anyContainerRunning(ctx context.Context, cli *docker.Client, project string
 // listing short-circuits, so a stopped project with objects costs one
 // container listing per pass.
 func projectEmpty(ctx context.Context, cli *docker.Client, project string, recorded []string) (bool, error) {
+	empty, _, err := projectLeftovers(ctx, cli, project, recorded)
+	return empty, err
+}
+
+// projectLeftovers reports what the daemon still holds of the project.
+// empty is projectEmpty's answer. tornDown reports the stronger finding
+// behind the torn-down rule: no non-kept container and no non-kept volume
+// is left (the same notion of kept projectEmpty uses), so only built
+// images, a network and kept objects remain - an agent or the operator
+// already ran the stack down (compose down -v, a test recipe's trap). A
+// volume that is left is data kept on purpose, so it clears tornDown too.
+// The first non-kept container or volume short-circuits both, so a
+// stopped project with objects costs one container listing per pass.
+func projectLeftovers(ctx context.Context, cli *docker.Client, project string, recorded []string) (empty, tornDown bool, err error) {
 	conts, err := cli.Containers(ctx, project)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	keptNets, keptVols, _ := keptUses(conts)
 	for _, c := range conts {
 		if !docker.Kept(c) {
-			return false, nil
+			return false, false, nil
 		}
 	}
 	nets, err := cli.Networks(ctx, project)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
+	netLeft := false
 	for _, n := range nets {
 		if !keptNets[n.Name] {
-			return false, nil
+			netLeft = true
 		}
 	}
 	vols, err := cli.Volumes(ctx, project)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	for _, v := range vols {
 		if !docker.Kept(v) && !keptVols[v.Name] {
-			return false, nil
+			return false, false, nil
 		}
 	}
-	// Presence's image rule: only an image the removal would actually
-	// delete something of keeps the lease (ImageScope.Step); an untagged
-	// leftover, an image that only inherited the project label, an image
-	// a kept container runs from or a kept service's tag never does. The
-	// listing is unfiltered so the stack's unlabelled built images
-	// (Compose v2) count too, through the services the lease recorded.
-	imgs, err := cli.Images(ctx, "")
-	if err != nil {
-		return false, err
-	}
-	scope := NewImageScope(project, conts, recorded)
-	for _, i := range imgs {
-		if len(scope.Step(i).Remove) > 0 {
-			return false, nil
+	// No non-kept container and no non-kept volume: the stack is torn
+	// down. Only a network or images can still hold it present.
+	tornDown = true
+	empty = !netLeft
+	if empty {
+		// Presence's image rule: only an image the removal would actually
+		// delete something of keeps the lease (ImageScope.Step); an untagged
+		// leftover, an image that only inherited the project label, an image
+		// a kept container runs from or a kept service's tag never does. The
+		// listing is unfiltered so the stack's unlabelled built images
+		// (Compose v2) count too, through the services the lease recorded.
+		imgs, err := cli.Images(ctx, "")
+		if err != nil {
+			return false, false, err
+		}
+		scope := NewImageScope(project, conts, recorded)
+		for _, i := range imgs {
+			if len(scope.Step(i).Remove) > 0 {
+				empty = false
+				break
+			}
 		}
 	}
-	return true, nil
+	return empty, tornDown, nil
 }
 
 // keptUses collects what the kept containers use: network names, volume

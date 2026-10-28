@@ -97,6 +97,11 @@ setting, and a longer one lengthens it while it is in force.
 the delays apply again under the new setting, so stacks already past theirs
 go at the next sweep. A stack without a label that stops while serve runs
 with `0` records `0` and stays until someone starts or extends it.
+A stack already torn down underneath its lease (an agent or the operator
+ran `docker compose down -v`, so no containers and no volumes are left) is
+removed on the next sweep after it stopped: the sweep deletes its leftover
+images and network at once instead of holding the lease until the delay
+passes.
 
 ### What belongs to a stack
 
