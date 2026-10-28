@@ -41,7 +41,7 @@ from making it mistake another container for itself.
 **Stop first, remove much later.** An idle stack costs RAM and CPU at once,
 and disk slowly. Stopping at expiry frees the first without losing anything,
 and `docker compose up` brings the stack back with its data. Removal,
-which deletes volumes, waits `--remove-after` (7 days by default, or never).
+which deletes volumes, waits `--remove-after` (24 hours by default, or never).
 A stopped stack's delay is recorded at the stop and never cut below that by
 later settings; a longer serve setting lengthens a delay that came from
 serve's setting (a label's delay stays as it is), and `0` pauses every

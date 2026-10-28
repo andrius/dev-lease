@@ -3,10 +3,10 @@
 # a self-hosted runner or in a local CI loop. Same contract as
 # examples/agents/lease-extend.sh: never blocks the pipeline, exits 0.
 #
-# Usage: ./extend.sh [ttl]   (ttl defaults to 2h)
+# Usage: ./extend.sh [ttl]   (ttl defaults to 1h)
 set -eu
 
-ttl=${1:-2h}
+ttl=${1:-1h}
 
 # The CI job's project: the job can pass its own name via CI_PROJECT,
 # otherwise <repo>-<worktree> is derived from git the same way the other

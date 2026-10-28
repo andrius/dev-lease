@@ -7,7 +7,7 @@ uses the stack extends it: a person, a script, a CI job, an AI agent's hook.
 
 - When the lease expires, the stack is stopped: its RAM and CPU are free
   again, and its data stays.
-- When it stays stopped for 7 days (the delay is yours to set), it is
+- When it stays stopped for 24 hours (the delay is yours to set), it is
   removed: its containers, networks, volumes and the images Compose built
   for it.
 - Labels in your compose file keep a service or a volume, or change the
@@ -61,11 +61,11 @@ disk.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> live: a managed project appears (default lease, 2h)
+    [*] --> live: a managed project appears (default lease, 1h)
     live --> live: extend
     live --> stopped: the lease expires
     stopped --> live: compose up, or extend
-    stopped --> removed: stopped for --remove-after (7d)
+    stopped --> removed: stopped for --remove-after (24h)
     removed --> [*]
 ```
 
@@ -224,7 +224,7 @@ You need Docker Engine with Compose v2 or later on Linux.
 
    `dl list` prints one line per stack, for example
    `myapp-feat-login: live, 3h59m left (until 2026-10-21T14:05:00Z; holders: alice)`
-   or `myapp-fix-cache: stopped 3h ago; removed in 6d20h (at 2026-10-28T06:02:00Z)`.
+   or `myapp-fix-cache: stopped 3h ago; removed in 21h (at 2026-10-22T06:02:00Z)`.
    `dl status` adds each stack's containers, networks, volumes and images.
 
    On PowerShell: `docker exec (docker ps -qf label=dev-lease.role=server) dev-lease list`.
@@ -304,20 +304,21 @@ recipe): it derives the project name from git, starts the worktree's stack
 with `docker compose -p <name>` and extends its lease (`./up.sh 4h`). Every
 later compose command in that worktree needs the same `-p` (or
 `COMPOSE_PROJECT_NAME`). Stacks of branches you left stop after their lease
-and free RAM at once; their volumes go a week later unless you come back.
+and free RAM at once; their volumes go a day later unless you come back.
 
 ## With automation and AI agents
 
 The rule for every caller is the same: extend when you start or use a
-stack, with a TTL that covers the job, and never extend a stack you are not
-using. Each extend records a holder, so `dl list` shows who keeps a stack
-alive: pass `--holder <name>` (through `docker exec` the default is
-`local`).
+stack, with a TTL that covers the job, never extend a stack you are not
+using, and when your work on a worktree is finished, take its stack down
+with `dl down <project>`. Each extend records a holder, so `dl list` shows
+who keeps a stack alive: pass `--holder <name>` (through `docker exec` the
+default is `local`).
 
 - **Claude Code.** [examples/agents](examples/agents): copy
   `lease-extend.sh` to `.claude/hooks/` and merge
   `claude-code-settings.json` into `.claude/settings.json`. Every session
-  then extends the worktree's lease for 2 hours.
+  then extends the worktree's lease for 1 hour.
 - **Any agent.** Paste [AGENTS-snippet.md](examples/agents/AGENTS-snippet.md)
   into the repository's `AGENTS.md` so every agent knows when to extend and
   how to bring a stopped stack back.
@@ -327,6 +328,10 @@ alive: pass `--holder <name>` (through `docker exec` the default is
   or extend again from the job's loop. A shorter extend never cuts a lease.
 - **Done early.** `dl release <project> --holder <name>` ends one claim;
   `--all` ends every claim and the next sweep stops the stack.
+- **Work finished.** When your work on a worktree is finished, `dl down
+  <project> [--holder <name>]` stops its stack and removes it now
+  (volumes included; a removal cannot be undone). Where serve does not
+  run, `docker compose -p <project> down -v` does the same.
 
 `lease-extend.sh` and `ci/extend.sh` never fail an agent or a pipeline:
 when Docker or serve is not there, they print a short message and exit 0
@@ -341,6 +346,7 @@ a serve that exists.
 | --- | --- |
 | `extend <project> <ttl> [--holder <name>]` | Renews that holder's claim; never shortens it. `ttl` from 1m to 7d. On a stopped stack the lease is live again; start the stack yourself. |
 | `release <project> (--holder <name> \| --all)` | Ends one claim, or every claim. |
+| `down <project> [--holder <name>]` | Stops the project's containers and removes it now, through the same removal a sweep runs: containers, networks, volumes and the project's own built images go, kept services and volumes and what a kept service uses stay, and the lease is deleted. Runs through serve, serialised with its sweeps. Nothing left on the daemon is 0 with a notice; a never-remove stack is refused. |
 | `list` | Every lease with its time left, its live holders, or when it stopped and when it is removed. |
 | `status` | For every managed stack: its containers, networks, volumes, images and lease; one "not managed" line for every other project. |
 | `serve --projects <patterns> [flags]` | The watcher (below). |
@@ -356,8 +362,8 @@ Durations are Go durations (`90m`, `2h`) or whole days (`7d`).
 | serve flag | Default | Meaning |
 | --- | --- | --- |
 | `--projects` (`DEV_LEASE_PROJECTS`) | required | Comma-separated glob patterns over Compose project names. |
-| `--default-ttl` | `2h` | The lease a new managed stack gets. |
-| `--remove-after` (`DEV_LEASE_REMOVE_AFTER`) | `168h` | How long a stopped stack is kept before removal, counted from the stop; `0` pauses every sweep removal. A later, shorter value never cuts a delay recorded at a stop. |
+| `--default-ttl` | `1h` | The lease a new managed stack gets. |
+| `--remove-after` (`DEV_LEASE_REMOVE_AFTER`) | `24h` | How long a stopped stack is kept before removal, counted from the stop; `0` pauses every sweep removal. A later, shorter value never cuts a delay recorded at a stop. |
 | `--interval` | `1m` | How often serve sweeps. |
 | `--stop-timeout` | `10s` | Stop timeout per container. |
 | `--exit-when-idle` | `false` | Exit when nothing is left to watch (the on-demand example sets it). |
@@ -426,9 +432,9 @@ The full behaviour is in [docs/reference.md](docs/reference.md).
   `--projects` glob patterns; `dev-lease extend` exits 2 for any other
   name. A project's objects are the ones carrying its
   `com.docker.compose.project` label. Nothing else on the daemon is touched.
-- **What happens to a managed stack.** It gets a lease (2h by default). At
+- **What happens to a managed stack.** It gets a lease (1h by default). At
   expiry every container is stopped, except services labelled
-  `dev-lease.keep`; no data is deleted. After the removal delay (7 days by
+  `dev-lease.keep`; no data is deleted. After the removal delay (24 hours by
   default, counted from the stop) its containers, networks, volumes with
   their data, and the images Compose built for it are removed. A removal
   cannot be undone.
@@ -436,7 +442,11 @@ The full behaviour is in [docs/reference.md](docs/reference.md).
   job (1m to 7d): `dev-lease extend <project> <ttl> --holder <your-name>`.
   A shorter extend never cuts a lease. Do not extend a stack you are not
   using.
-- **When you are done:** `dev-lease release <project> --holder <your-name>`.
+- **When you are done for now:** `dev-lease release <project> --holder <your-name>`.
+- **When your work on the worktree is finished:** `dev-lease down <project> [--holder <your-name>]`
+  stops its stack and removes it now, volumes included; a removal cannot be
+  undone. Where serve does not run, `docker compose -p <project> down -v`
+  does the same.
 - **To see the state:** `dev-lease list` prints one line per lease (live
   with its time left and holders, expired, or stopped and when it is
   removed); `dev-lease status` lists every managed stack with its

@@ -13,9 +13,10 @@ Self-contained example directories; copy the one you need:
   the project and extends its lease.
 - `agents/` - `lease-extend.sh` as a SessionStart hook, the matching
   `claude-code-settings.json` (copy the script to `.claude/hooks/` in your
-  repo), an `AGENTS-snippet.md` that explains the lease rules to agents,
-  and `mcp.md` - the MCP server: the `claude mcp add dev-lease` line and
-  what each tool does.
+  repo), an `AGENTS-snippet.md` that explains the lease rules to agents
+  (extend while you work, `dev-lease down` when your work on the worktree
+  is finished), and `mcp.md` - the MCP server: the `claude mcp add
+  dev-lease` line and what each tool does.
 - `ci/extend.sh` - extend the lease from a self-hosted runner or a local
   CI loop for the length of a test run.
 

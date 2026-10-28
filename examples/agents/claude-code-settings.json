@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/lease-extend.sh 2h"
+            "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/lease-extend.sh 1h"
           }
         ]
       }

@@ -24,9 +24,9 @@ services:
       - --interval
       - ${DEV_LEASE_INTERVAL:-1m}
       - --default-ttl
-      - 2h
+      - 1h
       - --remove-after
-      - ${DEV_LEASE_REMOVE_AFTER:-168h}
+      - ${DEV_LEASE_REMOVE_AFTER:-24h}
       - --stop-timeout
       - 10s
       - --state

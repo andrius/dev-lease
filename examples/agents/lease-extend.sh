@@ -12,7 +12,7 @@
 # comes from DEV_LEASE_HOLDER when set.
 set -eu
 
-ttl=${1:-2h}
+ttl=${1:-1h}
 holder=${DEV_LEASE_HOLDER:-}
 
 if [ "$#" -ge 2 ]; then

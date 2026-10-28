@@ -13,6 +13,10 @@ period. Work within the lease:
   shows every lease and what happens next (time left, or stopped how long
   ago and when the removal runs); `status` adds what each project has on
   the daemon.
+- When your work on this worktree is finished, remove its stack:
+  `docker exec "$(docker ps -qf label=dev-lease.role=server)" dev-lease down <project>`.
+  Where dev-lease serve does not run, `docker compose -p <project> down -v`
+  does the same. Both delete the volumes for real.
 - A stopped project is not lost: `docker compose -p <project> up -d --wait`
   brings it back and re-arms the lease. What was removed is gone for real,
   volumes included - rebuild instead of restoring.

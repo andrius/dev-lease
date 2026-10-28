@@ -23,8 +23,8 @@ dev-lease serve --projects <patterns> [flags]
 | Flag (environment variable) | Default | Meaning |
 | --- | --- | --- |
 | `--projects` (`DEV_LEASE_PROJECTS`) | required | Comma-separated glob patterns over Compose project names. A project is managed when its name matches a pattern and it is not serve's own project. |
-| `--default-ttl` | `2h` | The lease a managed project gets when serve first sees it without one. |
-| `--remove-after` (`DEV_LEASE_REMOVE_AFTER`) | `168h` | How long a stopped project is kept before it is removed, counted from the stop. `0` pauses every sweep removal while it is set. Otherwise at least `1h`. How a later value acts on a delay recorded at a stop: see the state table. |
+| `--default-ttl` | `1h` | The lease a managed project gets when serve first sees it without one. |
+| `--remove-after` (`DEV_LEASE_REMOVE_AFTER`) | `24h` | How long a stopped project is kept before it is removed, counted from the stop. `0` pauses every sweep removal while it is set. Otherwise at least `1h`. How a later value acts on a delay recorded at a stop: see the state table. |
 | `--interval` | `1m` | Time between sweeps; at least `1s`. |
 | `--stop-timeout` | `10s` | Stop timeout per container; at least `1s`. |
 | `--exit-when-idle` | `false` | Exit 0 when no managed project has a live lease, none has a running container that is not kept, and none is stopped waiting for a removal time (a stack whose delay is 0 does not count). Never before one full interval after start. |
@@ -63,6 +63,7 @@ the identity serve runs as.
 | `extend <project> <ttl> [--holder <name>]` | Renews that holder's claim to `max(current expiry, now + ttl)`, so it never shortens a lease, and prints the holder's new expiry. `ttl` from `1m` to `168h` (`7d`). On a `stopped` project the lease is live again, and the command prints that the stack must be started with `docker compose up -d`: dev-lease never starts containers. |
 | `release <project> --holder <name>` | Ends that holder's claim. |
 | `release <project> --all` | Ends every claim; the next sweep stops the project. Releasing a project without a lease changes nothing. |
+| `down <project> [--holder <name>]` | Stops the project's containers and removes it now, through the same removal path a sweep runs (kept services and volumes and what a kept service uses stay; the project's own built images go), then deletes the lease. The action runs inside serve, serialised with its sweeps; `--holder` only names the actor in serve's log. A project with no containers, networks or volumes left is 0 with a notice; a never-remove stack is refused (remove it from the dashboard). |
 | `list` | One line per lease (formats below). |
 | `status` | For every managed project on the daemon: its containers, networks, volumes, images and lease; one `not managed: <name>` line for every other project. |
 | `mcp [--state <file>]` | The MCP server for agents, on stdin and stdout (see below). Run with `docker exec -i`. |
@@ -75,10 +76,10 @@ Inside the container neither variable is set, so pass `--holder` or
 `list` prints, per project, one of:
 
 ```
-myapp-a: live, 1h28m left (until 2026-10-21T10:31:00Z; holders: agent, alice)
-myapp-b: stopped 3h ago; removed in 6d20h (at 2026-10-28T06:02:00Z)
+myapp-a: live, 1h28m left (until 2026-10-21T09:31:00Z; holders: agent, alice)
+myapp-b: stopped 3h ago; removed in 21h (at 2026-10-22T06:02:00Z)
 myapp-c: stopped 2d ago; never removed
-myapp-d: stopped 7d1h ago; removal overdue (at 2026-10-21T08:00:00Z)
+myapp-d: stopped 1d1h ago; removal overdue (at 2026-10-21T08:00:00Z)
 myapp-e: stopping
 myapp-f: removing
 myapp-g: expired (last holder ci)
@@ -108,8 +109,8 @@ neither lock.
   "version": 1,
   "header": {
     "patterns": ["myapp", "myapp-*"],
-    "default_ttl": 7200000000000,
-    "remove_after": 604800000000000
+    "default_ttl": 3600000000000,
+    "remove_after": 86400000000000
   },
   "leases": {
     "myapp-a": {
@@ -117,18 +118,18 @@ neither lock.
       "label_remove_after": 0,
       "services": ["db", "web"],
       "holders": [
-        {"name": "agent", "extended_at": "2026-10-21T08:31:00Z", "expires": "2026-10-21T10:31:00Z", "ttl": 7200000000000},
-        {"name": "alice", "extended_at": "2026-10-21T08:20:00Z", "expires": "2026-10-21T10:20:00Z", "ttl": 7200000000000}
+        {"name": "agent", "extended_at": "2026-10-21T08:31:00Z", "expires": "2026-10-21T09:31:00Z", "ttl": 3600000000000},
+        {"name": "alice", "extended_at": "2026-10-21T08:20:00Z", "expires": "2026-10-21T09:20:00Z", "ttl": 3600000000000}
       ]
     },
     "myapp-b": {
       "project": "myapp-b",
       "state": "stopped",
       "stopped_at": "2026-10-21T06:02:00Z",
-      "remove_after": 604800000000000,
+      "remove_after": 86400000000000,
       "remove_after_from": "serve",
       "holders": [
-        {"name": "ci", "extended_at": "2026-10-21T04:00:00Z", "expires": "2026-10-21T06:00:00Z", "ttl": 7200000000000}
+        {"name": "ci", "extended_at": "2026-10-21T04:00:00Z", "expires": "2026-10-21T05:00:00Z", "ttl": 3600000000000}
       ]
     }
   }
@@ -283,8 +284,9 @@ serve writes one JSON line per action to stdout:
 `action` is one of `grant`, `revive`, `clear-state`, `unknown-state`,
 `label`, `stop`, `remove`, `remove-network`, `remove-volume`,
 `remove-image`. `result` is `ok`, `error: <reason>` or
-`skipped: <reason>`. A line caused by the dashboard or by MCP carries
-`"via": "dashboard"` or `"via": "mcp"`.
+`skipped: <reason>`. A line caused by the dashboard, by MCP or by
+`dev-lease down` carries `"via": "dashboard"`, `"via": "mcp"` or
+`"via": "down <holder>"`.
 
 ## Running serve on demand
 
@@ -372,12 +374,14 @@ serve listens on a Unix socket next to the state file, `<state file>.sock`
 user. One JSON request and one JSON answer per connection:
 
 ```json
-{"action": "remove", "project": "myapp-b", "confirm": "myapp-b"}
+{"action": "remove", "project": "myapp-b", "confirm": "myapp-b", "holder": "bob"}
 {"ok": false, "code": "never_remove", "error": "..."}
 ```
 
 `action` is `stop` or `remove`; a remove needs `confirm` equal to
-`project`, and a stack marked never remove is always refused here. Answer
+`project`, and a stack marked never remove is always refused here. A
+remove may carry `holder`, the actor `dev-lease down` reports; it only
+tags the action's log lines. Answer
 codes: `bad_request`, `not_managed`, `no_stack`, `busy`, `never_remove`,
 `not_removed`, `shutting_down`. A socket left by a serve that died is
 replaced when serve starts.

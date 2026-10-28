@@ -4,10 +4,10 @@
 # The project name is <repo>-<worktree> derived from git (git's name for
 # the worktree, normally its directory name), lower-cased and normalised
 # the way compose normalises names, including dropping leading - and _.
-# Usage: ./up.sh [ttl]  (ttl defaults to 2h)
+# Usage: ./up.sh [ttl]  (ttl defaults to 1h)
 set -eu
 
-ttl=${1:-2h}
+ttl=${1:-1h}
 
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
 	echo "dev-lease: not in a git repository; nothing started" >&2
