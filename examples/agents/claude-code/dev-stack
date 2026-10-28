@@ -1,0 +1,419 @@
+#!/usr/bin/env bash
+# dev-stack - the compose stack of one worktree: its name, its lease, its
+# removal. The lease side goes through dev-lease (a `dev-lease serve`
+# container found by the label `dev-lease.role=server`, the CLI run with
+# `docker exec <container> dev-lease ...`), which stops idle stacks and
+# removes them later. The rule this tool serves: a worktree's stack is
+# extended while someone works in it, and removed when the work is done -
+# nothing broader.
+#
+# Interface (a skill and an AGENTS.md rule are built on exactly this - keep
+# it):
+#   dev-stack name [dir]     print the compose project name of dir (default .):
+#                            $COMPOSE_PROJECT_NAME, else the one in <dir>/.env,
+#                            else the compose file's top-level name:, else the
+#                            normalised directory basename. Exit 1 when dir has
+#                            no compose file and no COMPOSE_PROJECT_NAME.
+#   dev-stack extend [ttl] [dir]
+#                            extend that project's lease (ttl default 1h) with
+#                            holder $DEV_LEASE_HOLDER, else $USER. Never fails
+#                            its caller: one short stderr line and exit 0.
+#   dev-stack down [dir] [--repo <dir>] [--main]
+#                            remove that project's stack now. With dev-lease
+#                            serve running and its image new enough to know
+#                            the down command, the removal goes through serve
+#                            (`dev-lease down <name>`, the same removal a
+#                            sweep runs, keep labels included); otherwise it
+#                            goes through compose alone
+#                            (`docker compose -p <name> down -v
+#                            --remove-orphans --rmi local`). Either way the
+#                            lease is released afterwards. `down -p <name>`
+#                            tears a project down by name alone (down -v
+#                            --remove-orphans, no --rmi) when the directory is
+#                            already gone; --repo <dir> names the repository
+#                            that worktree belonged to. Refuses the project
+#                            dev-lease itself.
+#   dev-stack status         dev-lease list through serve, else docker compose
+#                            ls -a.
+#
+# OWNERSHIP - the rule `down` enforces, and why:
+#   A compose stack belongs to the worktree that owns it, and the main
+#   worktree's stack holds the developer's data. Every worktree of a
+#   repository carries the same compose file, so a branch worktree without
+#   its own COMPOSE_PROJECT_NAME resolves to the main worktree's project name
+#   and `down` there would take the main stack's volumes with it. So `down`
+#   refuses (exit 3, one line on stderr, nothing run) when the stack it would
+#   remove is the main worktree's:
+#     - in a linked worktree whose project name is the main worktree's: give
+#       the branch its own stack, COMPOSE_PROJECT_NAME=<repo>-<branch> in the
+#       worktree's .env (the repo's AGENTS.md asks for the same);
+#     - in the main worktree itself, unless --main is given.
+#   A directory that is not a git worktree at all keeps the plain behaviour.
+#
+# Bash 3.2 portable (it also runs on macOS): no ${var,,}, no associative
+# arrays, no readlink -f, no GNU-only flags. Never prints an environment value
+# or a .env line other than the project name itself.
+export LC_ALL=C
+
+# compose's own lookup order: the first of these that exists is THE compose
+# file of the directory; a name: absent from it falls through to the basename.
+COMPOSE_FILES="compose.yaml compose.yml docker-compose.yml docker-compose.yaml"
+
+help_text() {
+  cat <<'EOF'
+usage: dev-stack name [dir] | dev-stack extend [ttl] [dir] | dev-stack down [dir] [--repo <dir>] [--main] | dev-stack down -p <name> [--repo <dir>] [--main] | dev-stack status
+
+A compose stack belongs to the worktree that owns it, and the main worktree's
+stack holds the developer's data. So `dev-stack down` refuses (exit 3, one line
+on stderr, nothing run) when the stack it would remove is the main worktree's:
+  - in a linked worktree whose project name is the main worktree's: give the
+    branch its own stack instead, COMPOSE_PROJECT_NAME=<repo>-<branch> in the
+    worktree's .env;
+  - in the main worktree itself: pass --main to remove it on purpose.
+--repo <dir> names the repository when the target directory is already gone.
+EOF
+}
+
+usage() {
+  help_text >&2
+  exit 2
+}
+
+# A project name the way compose builds one from a directory name: lower case,
+# only a-z0-9_- kept, leading - and _ dropped (My_App.v2 -> my_appv2).
+normalise_name() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9_-]//g' -e 's/^[-_]*//'
+}
+
+# Trim a scalar read from .env or a compose file: surrounding space and quotes
+# off, a trailing comment off. Only the cleaned scalar is ever printed.
+clean_scalar() {
+  local v="$1"
+  v=${v#"${v%%[![:space:]]*}"}
+  v=${v%"${v##*[![:space:]]}"}
+  case "$v" in *' #'*) v=${v%%" #"*} ;; esac
+  case "$v" in \"*\") v=${v#\"}; v=${v%\"} ;; esac
+  case "$v" in \'*\') v=${v#\'}; v=${v%\'} ;; esac
+  printf '%s\n' "$v"
+}
+
+# The project name compose would build for $1 from the directory's own files:
+# the .env project name, else the compose file's top-level name:, else the
+# normalised basename (that last one only when a compose file exists - a
+# directory without one is not a stack). The ambient COMPOSE_PROJECT_NAME is
+# NOT read here: it belongs to the invocation, not to the worktree.
+own_stack_name() {
+  local dir="$1" f v
+  [ -d "$dir" ] || return 1
+  if [ -f "$dir/.env" ]; then
+    v=$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "$dir/.env" 2>/dev/null | head -n 1)
+    if [ -n "$v" ]; then
+      v=$(clean_scalar "$v")
+      [ -n "$v" ] && { printf '%s\n' "$v"; return 0; }
+    fi
+  fi
+  for f in $COMPOSE_FILES; do
+    [ -f "$dir/$f" ] || continue
+    v=$(sed -n 's/^name:[[:space:]]*//p' "$dir/$f" 2>/dev/null | head -n 1)
+    if [ -n "$v" ]; then
+      v=$(clean_scalar "$v")
+      [ -n "$v" ] && { printf '%s\n' "$v"; return 0; }
+    fi
+    printf '%s\n' "$(normalise_name "$(basename "$dir")")"
+    return 0
+  done
+  return 1
+}
+
+# Print the project name compose would use in $1, or return 1 when it is not a
+# stack directory. Precedence: the environment, <dir>/.env, the compose
+# file's name:, the normalised basename.
+derive_name() {
+  local dir="$1"
+  [ -n "${COMPOSE_PROJECT_NAME:-}" ] && { printf '%s\n' "$COMPOSE_PROJECT_NAME"; return 0; }
+  own_stack_name "$dir"
+}
+
+# The name a compose file of $1 declares (its top-level name:), or nothing.
+compose_declared_name() {
+  local dir="$1" f v
+  [ -d "$dir" ] || return 1
+  for f in $COMPOSE_FILES; do
+    [ -f "$dir/$f" ] || continue
+    v=$(sed -n 's/^name:[[:space:]]*//p' "$dir/$f" 2>/dev/null | head -n 1)
+    [ -n "$v" ] || return 1
+    v=$(clean_scalar "$v")
+    [ -n "$v" ] && { printf '%s\n' "$v"; return 0; }
+    return 1
+  done
+  return 1
+}
+
+# The absolute path of $1 with symlinks resolved (no readlink -f: macOS).
+abs_path() {
+  (cd "$1" 2>/dev/null && pwd -P)
+}
+
+# The root of the work tree that holds $1 (the worktree directory itself).
+worktree_root_of() {
+  git -C "$1" rev-parse --show-toplevel 2>/dev/null
+}
+
+# The main worktree of the repository that owns $1: the worktree on the main
+# branch (master counts too), else the first worktree git lists. The bare
+# repository itself is not a worktree and is skipped - in a bare layout (a
+# bare repository plus worktree checkouts) it is the first entry git prints.
+# Nothing when $1 is not in a repository.
+main_worktree_of() {
+  local dir="$1" out
+  out=$(git -C "$dir" worktree list --porcelain 2>/dev/null) || return 1
+  [ -n "$out" ] || return 1
+  # One record per worktree: the path, its branch, and whether it is the bare
+  # repository. RS="" keeps the last record, which has no blank line after it.
+  printf '%s\n' "$out" | awk '
+    BEGIN { RS = "" }
+    {
+      path = ""; branch = ""; bare = 0
+      n = split($0, lines, "\n")
+      for (i = 1; i <= n; i++) {
+        if (lines[i] ~ /^worktree /) path = substr(lines[i], 10)
+        else if (lines[i] ~ /^branch /) branch = substr(lines[i], 8)
+        else if (lines[i] == "bare") bare = 1
+      }
+      if (path == "" || bare == 1) next
+      if (best == "") best = path
+      if (branch == "refs/heads/main" || branch == "refs/heads/master") {
+        print path
+        found = 1
+        exit
+      }
+    }
+    END { if (found != 1 && best != "") print best }
+  '
+}
+
+# The main worktree's own project name: its .env, its compose file's name:,
+# else its normalised basename. Nothing when $1 is not in a repository.
+main_stack_name() {
+  local main
+  main=$(main_worktree_of "$1") || return 1
+  own_stack_name "$main"
+}
+
+# The project name that must not be removed: the main worktree's stack of the
+# repository $1. When the main worktree cannot be resolved, the name a compose
+# file of $1 declares.
+protected_project_name() { # protected_project_name <repo dir>
+  local repo="$1" n
+  [ -n "$repo" ] && [ -d "$repo" ] || return 1
+  if n=$(main_stack_name "$repo"); then printf '%s\n' "$n"; return 0; fi
+  if n=$(compose_declared_name "$repo"); then printf '%s\n' "$n"; return 0; fi
+  return 1
+}
+
+# The repository's own directory name, from the git common dir: it is the
+# repository name in the plain and in the bare layout alike.
+repo_name_of() {
+  local dir="$1" common
+  common=$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null) || return 1
+  case "$common" in
+    /*) ;;
+    *) common=$(cd "$dir" 2>/dev/null && cd "$common" 2>/dev/null && pwd -P) || return 1 ;;
+  esac
+  basename "$(dirname "$common")"
+}
+
+# The branch a worktree is on (feat), or nothing when it is detached.
+branch_name_of() {
+  local dir="$1" b
+  b=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null) || return 1
+  [ -n "$b" ] && [ "$b" != HEAD ] || return 1
+  printf '%s\n' "$b"
+}
+
+# The project name the branch should own instead of the main worktree's.
+own_stack_hint() { # own_stack_hint <worktree dir>
+  local dir="$1" repo branch
+  repo=$(repo_name_of "$dir") || repo=""
+  branch=$(branch_name_of "$dir") || branch=""
+  [ -n "$repo" ] || repo="<repo>"
+  [ -n "$branch" ] || branch="<branch>"
+  printf '%s-%s\n' "$repo" "$branch"
+}
+
+# The serve container id, or empty: no docker or no serve both read as empty.
+find_server() { docker ps -qf label=dev-lease.role=server 2>/dev/null | head -n 1; }
+
+# Yes when the serve container's dev-lease knows the down command. An older
+# image does not, and then the removal goes through compose alone.
+serve_has_down() { # serve_has_down <container id>
+  docker exec "$1" dev-lease --help 2>/dev/null | grep -q 'dev-lease down'
+}
+
+cmd_name() {
+  local dir="${1:-$PWD}" n
+  if n=$(derive_name "$dir"); then
+    printf '%s\n' "$n"
+    return 0
+  fi
+  echo "dev-stack: $dir is not a stack directory (no compose file, no COMPOSE_PROJECT_NAME)" >&2
+  return 1
+}
+
+cmd_extend() { # extend [ttl] [dir]
+  local ttl=1h dir="$PWD" name holder server out
+  [ $# -ge 1 ] && ttl="$1"
+  [ $# -ge 2 ] && dir="$2"
+  if ! name=$(derive_name "$dir"); then
+    echo "dev-stack: $dir is not a stack directory; the lease was not extended" >&2
+    return 0
+  fi
+  holder=${DEV_LEASE_HOLDER:-}
+  [ -n "$holder" ] || holder=${USER:-}
+  [ -n "$holder" ] || holder=$(id -un 2>/dev/null || echo unknown)
+  server=$(find_server)
+  if [ -z "$server" ]; then
+    echo "dev-stack: dev-lease serve is not running; the lease of $name was not extended" >&2
+    return 0
+  fi
+  if ! out=$(docker exec "$server" dev-lease extend "$name" "$ttl" --holder "$holder" 2>&1); then
+    echo "dev-stack: extend $name failed: $(printf '%s\n' "$out" | head -n 1)" >&2
+  fi
+  return 0
+}
+
+# Yes when $1 is the main worktree's stack of the repository $2 - the reason
+# on stderr, so the caller only has to return the exit code.
+refuses_by_name() { # refuses_by_name <name> <repo dir>
+  local name="$1" repo="$2" protected
+  protected=$(protected_project_name "$repo") || return 1
+  [ "$name" = "$protected" ] || return 1
+  echo "dev-stack: refusing to remove \"$name\": that is the main worktree's stack of $repo; pass --main to remove it on purpose" >&2
+  return 0
+}
+
+cmd_down() { # down [dir] [--repo <dir>] [--main] | down -p <name> [--repo <dir>] [--main]
+  local dir="" name="" out rc=0 server repo="" want_main=0 by_name=0 removed=0
+  local root main protected
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -p)
+        [ $# -ge 2 ] || { echo "dev-stack: -p needs a project name" >&2; return 2; }
+        name="$2"; by_name=1; shift 2 ;;
+      --repo)
+        [ $# -ge 2 ] || { echo "dev-stack: --repo needs a directory" >&2; return 2; }
+        repo="$2"; shift 2 ;;
+      --main) want_main=1; shift ;;
+      -*) echo "dev-stack: unknown option: $1" >&2; return 2 ;;
+      *) dir="$1"; shift ;;
+    esac
+  done
+  [ "$by_name" = 1 ] && dir=""
+  if [ -z "$name" ]; then
+    dir="${dir:-$PWD}"
+    if [ -d "$dir" ]; then
+      if ! name=$(derive_name "$dir"); then
+        echo "dev-stack: no compose stack in $dir; nothing to remove" >&2
+        return 0
+      fi
+    else
+      # The worktree is already gone: compose tears a project down by name
+      # alone, and the normalised basename is the name it had.
+      name=${COMPOSE_PROJECT_NAME:-$(normalise_name "$(basename "$dir")")}
+    fi
+  fi
+  if [ "$name" = dev-lease ] || [ "$(normalise_name "$name")" = dev-lease ]; then
+    echo "dev-stack: refusing to remove the dev-lease project itself" >&2
+    return 1
+  fi
+  # Ownership: the main worktree's stack is never removed by accident.
+  if [ "$by_name" = 1 ] || [ ! -d "$dir" ]; then
+    # The directory is gone (or the name was given alone): the repository the
+    # worktree belonged to is the only thing that can be known.
+    if [ "$want_main" != 1 ] && refuses_by_name "$name" "${repo:-$PWD}"; then
+      return 3
+    fi
+  else
+    root=$(worktree_root_of "$dir")
+    main=$(main_worktree_of "$dir")
+    if [ -n "$root" ] && [ -n "$main" ] && [ "$(abs_path "$root")" = "$(abs_path "$main")" ]; then
+      # The main worktree: its stack holds the dev data.
+      if [ "$want_main" != 1 ]; then
+        echo "dev-stack: refusing to remove the main worktree's stack \"$name\" from $dir: it holds the dev data; pass --main to remove it on purpose" >&2
+        return 3
+      fi
+    else
+      # A linked worktree: it may resolve to the main worktree's project.
+      protected=$(main_stack_name "$dir")
+      if [ -n "$protected" ] && [ "$name" = "$protected" ] && [ "$want_main" != 1 ]; then
+        echo "dev-stack: refusing to remove \"$name\" from $dir: that is the main worktree's stack; give this worktree its own stack with COMPOSE_PROJECT_NAME=$(own_stack_hint "$dir") in its .env" >&2
+        return 3
+      fi
+    fi
+  fi
+  server=$(find_server)
+  removed=0
+  if [ -n "$server" ] && serve_has_down "$server"; then
+    # The removal through serve: the same removal a sweep runs, with the keep
+    # labels and the never-remove rule honoured.
+    out=$(docker exec "$server" dev-lease down "$name" 2>&1); rc=$?
+    case "$rc" in
+      0)
+        printf '%s\n' "$out"
+        removed=1
+        ;;
+      2)
+        # Not a managed project: compose removes it anyway.
+        echo "dev-stack: $name is not managed by dev-lease; removing it with docker compose" >&2
+        ;;
+      *)
+        echo "dev-stack: dev-lease down $name failed: $(printf '%s\n' "$out" | head -n 1)" >&2
+        return "$rc"
+        ;;
+    esac
+  fi
+  if [ "$removed" != 1 ]; then
+    if [ -n "$dir" ] && [ -d "$dir" ]; then
+      out=$(cd "$dir" && docker compose -p "$name" down -v --remove-orphans --rmi local 2>&1); rc=$?
+    else
+      out=$(docker compose -p "$name" down -v --remove-orphans 2>&1); rc=$?
+    fi
+    # One line per thing compose removed, trimmed; anything else it said goes
+    # to stderr only when the run failed. The pattern ends in a star: compose
+    # pads its lines with a trailing space.
+    printf '%s\n' "$out" | while IFS= read -r line; do
+      case "$line" in
+        *Removed*) printf '%s\n' "$line" | tr -s ' ' | sed -e 's/^ //' -e 's/ $//' ;;
+      esac
+    done
+    if [ "$rc" -ne 0 ]; then
+      echo "dev-stack: docker compose down for $name failed: $(printf '%s\n' "$out" | grep -v Removed | head -n 1)" >&2
+    fi
+  fi
+  # The lease goes with the stack. A project serve does not manage answers
+  # "not managed" (exit 2), which is fine: the stack is gone either way.
+  if [ -n "$server" ]; then
+    docker exec "$server" dev-lease release "$name" --all > /dev/null 2>&1 || true
+  fi
+  return "$rc"
+}
+
+cmd_status() {
+  local server
+  command -v docker > /dev/null 2>&1 || { echo "dev-stack: docker is not on PATH" >&2; return 1; }
+  server=$(find_server)
+  if [ -n "$server" ]; then
+    docker exec "$server" dev-lease list
+    return $?
+  fi
+  docker compose ls -a
+}
+
+case "${1:-}" in
+  name)   shift; [ $# -le 1 ] || usage; cmd_name "$@" ;;
+  extend) shift; [ $# -le 2 ] || usage; cmd_extend "$@" ;;
+  down)   shift; [ $# -le 5 ] || usage; cmd_down "$@" ;;
+  status) shift; [ $# -eq 0 ] || usage; cmd_status "$@" ;;
+  -h|--help) help_text; exit 0 ;;
+  *) usage ;;
+esac
