@@ -17,6 +17,12 @@ Self-contained example directories; copy the one you need:
   (extend while you work, `dev-lease down` when your work on the worktree
   is finished), and `mcp.md` - the MCP server: the `claude mcp add
   dev-lease` line and what each tool does.
+- `agents/claude-code/` - the fuller setup for Claude Code: the `dev-stack`
+  helper (name, extend, down, status), four hooks (extend the lease,
+  release the claim, deny the broad prunes, remove a worktree's stack with
+  the worktree), the hook wiring in `settings.json`, the `dev-lease` skill
+  and a README with the install. The guide behind it is
+  [docs/ai-agents.md](../docs/ai-agents.md).
 - `ci/extend.sh` - extend the lease from a self-hosted runner or a local
   CI loop for the length of a test run.
 

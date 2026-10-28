@@ -35,6 +35,7 @@ the facts in short form.
 - [MCP for AI agents](#mcp-for-ai-agents)
 - [With git worktrees](#with-git-worktrees)
 - [With automation and AI agents](#with-automation-and-ai-agents)
+- [Setting up AI agents](docs/ai-agents.md)
 - [Commands](#commands)
 - [Safety](#safety)
 - [Images and platforms](#images-and-platforms)
@@ -318,7 +319,12 @@ default is `local`).
 - **Claude Code.** [examples/agents](examples/agents): copy
   `lease-extend.sh` to `.claude/hooks/` and merge
   `claude-code-settings.json` into `.claude/settings.json`. Every session
-  then extends the worktree's lease for 1 hour.
+  then extends the worktree's lease for 1 hour. The fuller setup (the
+  helper, four hooks, a skill) is in
+  [examples/agents/claude-code](examples/agents/claude-code), and
+  [docs/ai-agents.md](docs/ai-agents.md) is the guide for both: the naming
+  rule, the patterns serve must cover, what each hook does, and a
+  five-minute setup.
 - **Any agent.** Paste [AGENTS-snippet.md](examples/agents/AGENTS-snippet.md)
   into the repository's `AGENTS.md` so every agent knows when to extend and
   how to bring a stopped stack back.
@@ -432,6 +438,15 @@ The full behaviour is in [docs/reference.md](docs/reference.md).
   `--projects` glob patterns; `dev-lease extend` exits 2 for any other
   name. A project's objects are the ones carrying its
   `com.docker.compose.project` label. Nothing else on the daemon is touched.
+- **One stack per worktree.** Give every worktree its own Compose project
+  name (`<repo>-<worktree>`) and its own `COMPOSE_PROJECT_NAME` in its
+  `.env`. A compose file with a top-level `name:` pins the name for every
+  worktree of that repository, so a branch worktree shares the main
+  worktree's stack: its containers, volumes and network, and its data.
+- **Never a broad prune.** `docker system prune`, `docker volume prune`,
+  `docker container prune` and `docker image prune -a` delete other
+  worktrees' data. Remove your own stack instead (the command above), and
+  never a stack that belongs to another worktree.
 - **What happens to a managed stack.** It gets a lease (1h by default). At
   expiry every container is stopped, except services labelled
   `dev-lease.keep`; no data is deleted. After the removal delay (24 hours by
@@ -470,7 +485,8 @@ The full behaviour is in [docs/reference.md](docs/reference.md).
   being stopped or removed right now, retry in a moment.
 - **To tell agents in your own repository,** paste
   [AGENTS-snippet.md](examples/agents/AGENTS-snippet.md) into its
-  `AGENTS.md`.
+  `AGENTS.md`. The setup guide for a coding agent (the helper, the hooks,
+  the skill, the naming rule) is [docs/ai-agents.md](docs/ai-agents.md).
 
 ## Development
 
@@ -478,6 +494,7 @@ The full behaviour is in [docs/reference.md](docs/reference.md).
 go vet ./...
 go test -race ./...
 go test -tags integration ./integration/...   # needs Docker; creates and removes devlease-it-* and devlease-keep-* projects
+.github/scripts/test-agent-stack.sh           # the agent helper and its hooks, against a fake docker
 ```
 
 The browser tests (Playwright, in [e2e/](e2e)) run in CI against a real
@@ -489,7 +506,9 @@ integration test runs the whole lifecycle (live, stopped, removed, with a
 kept service and a kept volume) against a real daemon. CI also checks every
 example: `docker compose config` for the compose files, `bash -n` and
 shellcheck for the scripts, `jq` for the JSON, and a smoke test that starts
-serve from the basic example and extends a lease with the agent script.
+serve from the basic example and extends a lease with the agent script. The
+agent helper and its hooks are tested against a fake docker on a curated
+PATH, so the real daemon is never touched.
 
 More: [docs/design.md](docs/design.md) (the decisions and why),
 [docs/reference.md](docs/reference.md), [examples/](examples),
