@@ -78,14 +78,20 @@ func TestPassEmptyCheckPerKind(t *testing.T) {
 			t.Fatal("stopped lease with a stopped container left on the daemon was dropped")
 		}
 	})
-	t.Run("a network keeps the stopped lease", func(t *testing.T) {
+	// A network or an image alone (containers and volumes gone) is a
+	// torn-down stack since 2026-10-28: the pass removes it now instead
+	// of keeping the lease until the deadline (torn_down_test.go).
+	t.Run("a network alone is a torn-down stack: removed, lease gone", func(t *testing.T) {
 		h := newHarness(t)
 		fullProject(h.srv)
 		stopHarnessProject(t, h)
 		removeEverything(t, h, "n1")
 		h.pass(t)
-		if _, ok := h.leases()["myapp"]; !ok {
-			t.Fatal("stopped lease with a network left on the daemon was dropped")
+		if _, ok := h.leases()["myapp"]; ok {
+			t.Fatal("a torn-down stack with only its network left kept its lease")
+		}
+		if n, _ := docker.New(h.srv.Socket).Networks(context.Background(), "myapp"); len(n) != 0 {
+			t.Fatalf("the network was left: %v", n)
 		}
 	})
 	t.Run("a volume keeps the stopped lease", func(t *testing.T) {
@@ -98,7 +104,7 @@ func TestPassEmptyCheckPerKind(t *testing.T) {
 			t.Fatal("stopped lease with a volume left on the daemon was dropped")
 		}
 	})
-	t.Run("an image matching the tag rule keeps the stopped lease", func(t *testing.T) {
+	t.Run("an image matching the tag rule alone is a torn-down stack: removed, lease gone", func(t *testing.T) {
 		h := newHarness(t)
 		fullProject(h.srv)
 		// The image presence counts: a <project>-<service> tag with the
@@ -109,8 +115,8 @@ func TestPassEmptyCheckPerKind(t *testing.T) {
 		stopHarnessProject(t, h)
 		removeEverything(t, h, "sha256:i2")
 		h.pass(t)
-		if _, ok := h.leases()["myapp"]; !ok {
-			t.Fatal("stopped lease with a tag-matching image left on the daemon was dropped")
+		if _, ok := h.leases()["myapp"]; ok {
+			t.Fatal("a torn-down stack with only its built image left kept its lease")
 		}
 	})
 	t.Run("nothing left drops the stopped lease", func(t *testing.T) {
