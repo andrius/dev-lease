@@ -24,7 +24,7 @@
 # from DEV_LEASE_DASHBOARD_HOSTS and DEV_LEASE_DASHBOARD_TOKEN.
 services:
   dev-lease:
-    image: ghcr.io/andrius/dev-lease:v0.2.0
+    image: ghcr.io/andrius/dev-lease:v0.2.1
     labels:
       dev-lease.role: server
     command:

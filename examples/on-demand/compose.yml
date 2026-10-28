@@ -14,7 +14,7 @@
 #   docker compose -p dev-lease -f examples/on-demand/compose.yml up -d --no-recreate --wait
 services:
   dev-lease:
-    image: ghcr.io/andrius/dev-lease:v0.2.0
+    image: ghcr.io/andrius/dev-lease:v0.2.1
     labels:
       dev-lease.role: server
     command:
