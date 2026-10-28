@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andrius/dev-lease/internal/control"
 	"github.com/andrius/dev-lease/internal/docker"
 	"github.com/andrius/dev-lease/internal/lease"
 	"github.com/andrius/dev-lease/internal/reaper"
@@ -104,6 +105,61 @@ func runExtend(w io.Writer, st lease.Store, project, ttlStr, holder string) int 
 	fmt.Fprintf(w, "extended %s until %s (holder %s)\n",
 		project, holderExpiry(st, project, holder).Format(time.RFC3339), holder)
 	return 0
+}
+
+// runDown stops a managed project's containers and removes the project
+// now, through the same removal path a sweep runs: the request goes to
+// serve over the control socket, so the action runs under serve's runner
+// lock, serialised against every sweep, keeps exactly what a sweep
+// removal keeps (services and volumes labelled dev-lease.keep, and what a
+// kept service uses), removes the project's own built images and deletes
+// the lease afterwards whatever the outcome. Exit codes: 0 removed, also
+// when nothing of the project is left; 1 an unreachable serve, a refusal
+// (a never-remove stack) or a removal that did not finish; 2 not a
+// managed project; 3 the project is being stopped or removed right now.
+func runDown(ctx context.Context, w io.Writer, st lease.Store, project, holder string) int {
+	if code := managedByHeader(st, project, w); code != 0 {
+		return code
+	}
+	if holder == "" {
+		holder = defaultHolder()
+	}
+	ans, err := control.Call(ctx, control.SocketPath(st.Path), control.Request{
+		Action:  "remove",
+		Project: project,
+		Confirm: project,
+		Holder:  holder,
+	})
+	if err != nil {
+		fmt.Fprintf(w, "down %s: %v\n", project, err)
+		return 1
+	}
+	if ans.OK {
+		if r := ans.Report; r != nil && len(r.Skipped) > 0 {
+			fmt.Fprintf(w, "removed %s; kept: %s\n", project, strings.Join(r.Skipped, ", "))
+		} else {
+			fmt.Fprintf(w, "removed %s\n", project)
+		}
+		return 0
+	}
+	switch ans.Code {
+	case control.CodeNoStack:
+		fmt.Fprintf(w, "%s has no containers, networks or volumes left; nothing to remove\n", project)
+		return 0
+	case control.CodeNotManaged:
+		fmt.Fprintln(w, ans.Error)
+		return 2
+	case control.CodeBusy:
+		fmt.Fprintf(w, "%s is being stopped or removed right now; retry in a moment\n", project)
+		return 3
+	case control.CodeNeverRemove:
+		fmt.Fprintf(w, "%s is marked never remove; remove it from the dashboard if you mean it\n", project)
+	case control.CodeShuttingDown:
+		fmt.Fprintln(w, "dev-lease serve is shutting down; try again when it is back")
+	default:
+		fmt.Fprintln(w, ans.Error)
+	}
+	return 1
 }
 
 // headerRemoveAfter reads the header's remove-after best-effort; 0 when

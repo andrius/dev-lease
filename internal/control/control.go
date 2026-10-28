@@ -55,11 +55,14 @@ func init() {
 }
 
 // Request is one control request. Confirm must repeat Project for a
-// removal; a stop ignores it.
+// removal; a stop ignores it. Holder names the actor a `dev-lease down`
+// client reports; a removal tags its action log lines with it
+// (via "down <holder>"), and empty keeps the socket's own via.
 type Request struct {
 	Action  string `json:"action"`
 	Project string `json:"project"`
 	Confirm string `json:"confirm"`
+	Holder  string `json:"holder,omitempty"`
 }
 
 // Answer is one control answer. OK answers carry the runner's Report; a
@@ -173,7 +176,11 @@ func handle(conn net.Conn, ctx context.Context, r *reaper.Runner) {
 		}
 		// Never remove is refused: removing such a project must stay an
 		// explicit serve-level decision, not something the socket can do.
-		rep, err := r.RemoveNow(ctx, req.Project, reaper.RemoveOptions{Via: "mcp"})
+		opts := reaper.RemoveOptions{Via: "mcp"}
+		if req.Holder != "" {
+			opts.Via = "down " + req.Holder
+		}
+		rep, err := r.RemoveNow(ctx, req.Project, opts)
 		if err != nil && ctx.Err() != nil {
 			write(conn, refuse(CodeShuttingDown, "serve is shutting down"))
 			return

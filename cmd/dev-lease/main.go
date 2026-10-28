@@ -37,6 +37,7 @@ usage:
                    [--socket /var/run/docker.sock] [--exit-when-idle]
   dev-lease extend <project> <ttl> [--holder <name>]
   dev-lease release <project> (--holder <name> | --all)
+  dev-lease down <project> [--holder <name>]
   dev-lease list
   dev-lease status
   dev-lease mcp     [--socket /var/run/docker.sock] [--state /data/leases.json]
@@ -59,7 +60,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runServeCmd(args[1:], stdout, stderr)
 	case "mcp":
 		return runMCPCmd(args[1:], stdout, stderr)
-	case "extend", "release", "list", "status":
+	case "extend", "release", "down", "list", "status":
 		// These commands run as root inside the container when exec'd; drop
 		// privileges the same way serve does before touching the daemon or
 		// the state file.
@@ -72,6 +73,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return runExtendCmd(args[1:], stdout, stderr)
 		case "release":
 			return runReleaseCmd(args[1:], stdout, stderr)
+		case "down":
+			return runDownCmd(args[1:], stdout, stderr)
 		case "list":
 			return runListCmd(args[1:], stdout, stderr)
 		case "status":
@@ -399,6 +402,26 @@ func runReleaseCmd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return runRelease(stdout, lease.Store{Path: statePath()}, rest[0], *holder, *all)
+}
+
+// runDownCmd parses `down <project> [--holder <name>]`.
+func runDownCmd(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("down", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	holder := fs.String("holder", "", "name of the holder (default: $DEV_LEASE_HOLDER or $USER)")
+	if err := fs.Parse(reorderArgs(fs, args)); err != nil {
+		return 1
+	}
+	rest := fs.Args()
+	if len(rest) != 1 {
+		fmt.Fprintln(stderr, "down: usage: dev-lease down <project> [--holder <name>]")
+		return 1
+	}
+	// A removal can take a while on a big stack: Ctrl-C gives up on the
+	// answer, serve may still finish the action.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return runDown(ctx, stdout, lease.Store{Path: statePath()}, rest[0], *holder)
 }
 
 func runListCmd(args []string, stdout, stderr io.Writer) int {
