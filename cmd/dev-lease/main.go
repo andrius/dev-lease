@@ -31,8 +31,8 @@ func main() {
 const usageText = `dev-lease - TTL leases for local Docker Compose projects
 
 usage:
-  dev-lease serve  --projects <p,p-*> [--interval 1m] [--default-ttl 2h]
-                   [--remove-after 168h] [--stop-timeout 10s]
+  dev-lease serve  --projects <p,p-*> [--interval 1m] [--default-ttl 1h]
+                   [--remove-after 24h] [--stop-timeout 10s]
                    [--state /data/leases.json]
                    [--socket /var/run/docker.sock] [--exit-when-idle]
   dev-lease extend <project> <ttl> [--holder <name>]
@@ -175,9 +175,9 @@ func runServeCmd(args []string, stdout, stderr io.Writer) int {
 	// logged. It is read once here and travels no further than runServe.
 	dashboardToken := os.Getenv("DEV_LEASE_DASHBOARD_TOKEN")
 	interval := time.Minute
-	defaultTTL := 2 * time.Hour
+	defaultTTL := time.Hour
 	stopTimeout := 10 * time.Second
-	removeAfter := 168 * time.Hour
+	removeAfter := 24 * time.Hour
 	if v := os.Getenv("DEV_LEASE_REMOVE_AFTER"); v != "" {
 		d, err := parseDuration(v)
 		if err != nil {

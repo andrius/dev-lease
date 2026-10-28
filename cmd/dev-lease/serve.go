@@ -80,7 +80,7 @@ func runServe(ctx context.Context, cfg serveConfig) error {
 		return fmt.Errorf("--interval must be positive, got %s", cfg.Interval)
 	}
 	if cfg.DefaultTTL == 0 {
-		cfg.DefaultTTL = 2 * time.Hour // the flag default
+		cfg.DefaultTTL = time.Hour // the flag default
 	}
 	if err := lease.ValidateTTL(cfg.DefaultTTL); err != nil {
 		return fmt.Errorf("--default-ttl: %w", err)

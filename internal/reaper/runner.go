@@ -282,7 +282,7 @@ func (r *Runner) cfg() Config {
 		cfg.Log = io.Discard
 	}
 	if cfg.DefaultTTL <= 0 {
-		cfg.DefaultTTL = 2 * time.Hour
+		cfg.DefaultTTL = time.Hour
 	}
 	if cfg.StopTimeout <= 0 {
 		cfg.StopTimeout = 10 * time.Second

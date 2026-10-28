@@ -847,12 +847,12 @@ func TestListUsesHeaderRemoveAfterForStoppedLease(t *testing.T) {
 	}
 }
 
-// serve writes remove_after into the state header: the flag default is
-// 168h and DEV_LEASE_REMOVE_AFTER overrides it; an unparsable value is
-// refused with exit 1.
+// serve writes default_ttl and remove_after into the state header: the
+// flag defaults are 1h and 24h, and DEV_LEASE_REMOVE_AFTER overrides
+// remove-after; an unparsable value is refused with exit 1.
 func TestServeCmdEnvAndDefaultRemoveAfterInHeader(t *testing.T) {
 	skipServeWhenRoot(t)
-	run := func(env string) (int, time.Duration, string) {
+	run := func(env string) (int, time.Duration, time.Duration, string) {
 		st := tempStore(t)
 		srv := fakedocker.New(t)
 		withOwnContainer(t, srv, "own", "dev-lease")
@@ -866,20 +866,23 @@ func TestServeCmdEnvAndDefaultRemoveAfterInHeader(t *testing.T) {
 		}, &out, &errOut)
 		hdr, err := st.ReadHeader()
 		if err != nil {
-			return code, 0, errOut.String()
+			return code, 0, 0, errOut.String()
 		}
-		return code, hdr.RemoveAfter, errOut.String()
+		return code, hdr.DefaultTTL, hdr.RemoveAfter, errOut.String()
 	}
 
-	code, ra, errOut := run("")
+	code, ttl, ra, errOut := run("")
 	if code != 0 {
-		t.Fatalf("serve with the default remove-after = %d, want 0 (%q)", code, errOut)
+		t.Fatalf("serve with the flag defaults = %d, want 0 (%q)", code, errOut)
 	}
-	if ra != 168*time.Hour {
-		t.Fatalf("header remove_after = %v, want the default 168h", ra)
+	if ra != 24*time.Hour {
+		t.Fatalf("header remove_after = %v, want the default 24h", ra)
+	}
+	if ttl != time.Hour {
+		t.Fatalf("header default_ttl = %v, want the default 1h", ttl)
 	}
 
-	code, ra, errOut = run("36h")
+	code, _, ra, errOut = run("36h")
 	if code != 0 {
 		t.Fatalf("serve with DEV_LEASE_REMOVE_AFTER=36h = %d, want 0 (%q)", code, errOut)
 	}
@@ -887,7 +890,7 @@ func TestServeCmdEnvAndDefaultRemoveAfterInHeader(t *testing.T) {
 		t.Fatalf("header remove_after = %v, want 36h from the environment", ra)
 	}
 
-	code, _, errOut = run("banana")
+	code, _, _, errOut = run("banana")
 	if code != 1 {
 		t.Fatalf("serve with DEV_LEASE_REMOVE_AFTER=banana = %d, want 1 (%q)", code, errOut)
 	}

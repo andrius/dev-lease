@@ -156,7 +156,7 @@ func (s *server) funcs() template.FuncMap {
 func (s *server) cfg() reaper.Config {
 	cfg := s.runner.Cfg
 	if cfg.DefaultTTL <= 0 {
-		cfg.DefaultTTL = 2 * time.Hour
+		cfg.DefaultTTL = time.Hour
 	}
 	return cfg
 }

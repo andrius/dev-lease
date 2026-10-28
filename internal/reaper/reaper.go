@@ -29,10 +29,10 @@ type Config struct {
 	Patterns []string
 	// Own is dev-lease's own Compose project; never reaped.
 	Own string
-	// DefaultTTL is the lease a new managed project gets (default 2h).
+	// DefaultTTL is the lease a new managed project gets (default 1h).
 	DefaultTTL time.Duration
 	// RemoveAfter is how long a stopped project is kept before it is
-	// removed; 0 means never remove (default 168h at the CLI).
+	// removed; 0 means never remove (default 24h at the CLI).
 	RemoveAfter time.Duration
 	// StopTimeout bounds each container stop (default 10s).
 	StopTimeout time.Duration
@@ -88,7 +88,7 @@ func PassWith(ctx context.Context, cli *docker.Client, st lease.Store, cfg Confi
 		log = io.Discard
 	}
 	if cfg.DefaultTTL <= 0 {
-		cfg.DefaultTTL = 2 * time.Hour
+		cfg.DefaultTTL = time.Hour
 	}
 	if cfg.StopTimeout <= 0 {
 		cfg.StopTimeout = 10 * time.Second
