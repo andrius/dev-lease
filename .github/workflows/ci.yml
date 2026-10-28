@@ -75,9 +75,18 @@ jobs:
           find examples -name '*.sh' -exec sh -ec '
             for f do bash -n "$f" || exit 1; shellcheck "$f" || exit 1; done
           ' sh {} +
+          # The agent helper has no .sh suffix, so the find above misses it.
+          for f in examples/agents/claude-code/dev-stack; do
+            bash -n "$f" || exit 1
+            shellcheck "$f" || exit 1
+          done
           find examples -name '*.json' -exec sh -ec '
             for f do jq empty "$f" || exit 1; done
           ' sh {} +
+      - name: the agent helper and its hooks
+        # The helper and the four hooks against a fake docker on a curated
+        # PATH: the real daemon is never touched.
+        run: .github/scripts/test-agent-stack.sh
       - name: the release image metadata reaches the index, the manifests and the configs
         # The release's own script and flags, with a test tag, built for both
         # platforms into an OCI layout instead of being pushed. GitHub's
