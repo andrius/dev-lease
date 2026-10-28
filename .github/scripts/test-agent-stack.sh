@@ -289,6 +289,8 @@ else bad 34b "rc=$rc calls=[$(calls)]"; fi
 GITREPO=$T/gitrepo
 GITFEAT=$T/gitrepo-feat
 mkdir -p "$GITREPO"
+# The initial branch is pinned and every branch worktree names its start
+# point: the fixture must not depend on the user's init.defaultBranch.
 git -C "$GITREPO" init -q -b main
 printf 'name: app\nservices:\n  web:\n    image: busybox\n' > "$GITREPO/compose.yml"
 git -C "$GITREPO" add -A
@@ -297,7 +299,7 @@ git -C "$GITREPO" add -A
 git -C "$GITREPO" config maintenance.auto false
 git -C "$GITREPO" config gc.auto 0
 git -C "$GITREPO" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -q -m "init"
-git -C "$GITREPO" -c core.hooksPath=/dev/null worktree add -q -b feat "$GITFEAT"
+git -C "$GITREPO" -c core.hooksPath=/dev/null worktree add -q -b feat "$GITFEAT" main
 
 run; out=$(env -u COMPOSE_PROJECT_NAME PATH="$P" "$DEV" down "$GITFEAT" 2>"$T/err"); rc=$?
 if [ "$rc" = 3 ] && [ "$(grep -c . "$T/err" || true)" = 1 ] && grep -q "main worktree" "$T/err" \
@@ -337,7 +339,9 @@ else bad 39c "rc=$rc err=[$(cat "$T/err")] calls=[$(calls)]"; fi
 # on the main branch - the guard has to find it all the same.
 BARER=$T/bare
 mkdir -p "$BARER/.bare"
-git -C "$BARER/.bare" init -q --bare
+# The bare repository starts on main too, so the branch the main worktree
+# checks out is the branch the bare repository points at.
+git -C "$BARER/.bare" init -q --bare -b main
 git -C "$BARER/.bare" config maintenance.auto false
 git -C "$BARER/.bare" config gc.auto 0
 printf 'gitdir: ./.bare\n' > "$BARER/.git"
@@ -345,7 +349,7 @@ git -C "$BARER/.bare" -c core.hooksPath=/dev/null worktree add -q -b main "$BARE
 printf 'name: bareapp\nservices:\n  web:\n    image: busybox\n' > "$BARER/main/compose.yml"
 git -C "$BARER/main" add -A
 git -C "$BARER/main" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -q -m "init"
-git -C "$BARER/.bare" -c core.hooksPath=/dev/null worktree add -q -b feat "$BARER/feat"
+git -C "$BARER/.bare" -c core.hooksPath=/dev/null worktree add -q -b feat "$BARER/feat" main
 run; out=$(env -u COMPOSE_PROJECT_NAME PATH="$P" "$DEV" down "$BARER/feat" 2>"$T/err"); rc=$?
 if [ "$rc" = 3 ] && [ "$(grep -c . "$T/err" || true)" = 1 ] && grep -q "main worktree" "$T/err" && [ ! -s "$DLOG" ]; then
   pass 40 "the bare layout: a branch worktree on the main worktree's stack -> exit 3, no docker call"
