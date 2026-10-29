@@ -135,7 +135,9 @@ func TestOtherProjectRemovalLeavesUnlabelledProjectImage(t *testing.T) {
 }
 
 // RemoveNow shares the rule: the unlabelled built image goes, the pulled
-// image and another project's image stay.
+// image and another project's image stay, and another project's image
+// that carries this stack's own tag loses that tag (and goes with it when
+// it is the image's last one).
 func TestRemoveNowRemovesUnlabelledBuiltImage(t *testing.T) {
 	h := newHarness(t)
 	srv := h.srv
@@ -147,7 +149,10 @@ func TestRemoveNowRemovesUnlabelledBuiltImage(t *testing.T) {
 	}, "sha256:pg", nil, nil)
 	srv.AddLabels("image", "sha256:unlab", "myapp-web:latest", nil)
 	srv.AddLabels("image", "sha256:pg", "postgres:16-alpine", nil)
-	srv.AddLabels("image", "sha256:xlab", "myapp-web:old", map[string]string{
+	srv.AddLabels("image", "sha256:xlab", "other-web:latest", map[string]string{
+		docker.ProjectLabel: "other", docker.ServiceLabel: "web",
+	})
+	srv.AddLabels("image", "sha256:xmine", "myapp-web:old", map[string]string{
 		docker.ProjectLabel: "other", docker.ServiceLabel: "web",
 	})
 	srv.Add("volume", "v1", "myapp_data", "myapp")
@@ -169,6 +174,9 @@ func TestRemoveNowRemovesUnlabelledBuiltImage(t *testing.T) {
 	}
 	if !srv.Has("image", "sha256:xlab") {
 		t.Error("RemoveNow removed another project's image")
+	}
+	if srv.Has("image", "sha256:xmine") {
+		t.Error("RemoveNow left the image that carried this stack's own tag")
 	}
 	if srv.Has("volume", "v1") {
 		t.Error("RemoveNow left the volume")

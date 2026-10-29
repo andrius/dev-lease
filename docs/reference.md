@@ -218,9 +218,12 @@ so a state file from a newer format is never misread.
       way), those with a tag whose whole repository is
       `<project>-<service>` for one of the project's services (from its
       containers, or from `services` in the lease when none is left). An
-      image labelled for another project never matches, and pulled images
-      such as `postgres:16-alpine` never match either. Images are deleted
-      without `force`, and an image a kept container runs from stays. An
+      image labelled for another project is not the project's own, but a
+      tag of the `<project>-<service>` shape for one of the project's
+      services comes off it as well (identical builds share one image id
+      across projects), and the image is deleted only with its last tag;
+      pulled images such as `postgres:16-alpine` never match. Images are
+      deleted without `force`, and an image a kept container runs from stays. An
       image with one tag (or none) is deleted by id, which names exactly
       the listed image; Docker refuses one another container uses. An
       image with several tags cannot be deleted by id (identical builds

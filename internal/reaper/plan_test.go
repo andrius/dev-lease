@@ -82,8 +82,9 @@ func TestPlanForMatchesEngineActions(t *testing.T) {
 	srv.AddLabels("image", "sha256:left", "myapp-db:latest", nil)
 	srv.AddLabels("image", "sha256:pg2", "postgres:16-alpine", nil)
 	// An image labelled for another project but tagged like myapp's web
-	// image: neither removal may touch it.
-	srv.AddLabels("image", "sha256:xlab", "myapp-web:latest", map[string]string{
+	// image: myapp's removal takes that tag off it, and the image goes
+	// with its last tag. The other project's removal never touches it.
+	srv.AddLabels("image", "sha256:xlab", "myapp-web:old", map[string]string{
 		docker.ProjectLabel: "other", docker.ServiceLabel: "web",
 	})
 
@@ -178,7 +179,7 @@ func TestPlanForMatchesEngineActions(t *testing.T) {
 		Containers: []string{"myapp_db_1", "myapp_db_2", "myapp_old_1", "myapp_web_1", "myapp_worker_1"},
 		Networks:   []string{"myapp_default"},
 		Volumes:    []string{"myapp_data"},
-		Images:     []string{"myapp-db:latest", "myapp-web:latest", "myapp-worker:latest"},
+		Images:     []string{"myapp-db:latest", "myapp-web:latest", "myapp-web:old", "myapp-worker:latest"},
 		Kept:       []string{},
 	})
 
@@ -298,8 +299,8 @@ func TestPlanForMatchesEngineActions(t *testing.T) {
 	// The removal lists images unfiltered (the unlabelled Compose v2 built
 	// images are in the plan) and one tag name can sit on several images,
 	// so the surviving images are pinned id by id.
-	if srv.Count("image") != 4 {
-		t.Fatalf("images left = %d, want 4", srv.Count("image"))
+	if srv.Count("image") != 3 {
+		t.Fatalf("images left = %d, want 3", srv.Count("image"))
 	}
 	for _, w := range []struct {
 		id   string
@@ -312,7 +313,7 @@ func TestPlanForMatchesEngineActions(t *testing.T) {
 		{"sha256:unlab", true},    // myapp's unlabelled built image, a container ran from it
 		{"sha256:left", true},     // myapp's unlabelled built image, no container left: the db tag matches the db service
 		{"sha256:pg2", false},     // the pulled image a non-kept container runs from
-		{"sha256:xlab", false},    // labelled for other, tagged like myapp's web image
+		{"sha256:xlab", true},     // labelled for other: myapp's own tag comes off, and the image with it
 	} {
 		if got := srv.Has("image", w.id); got == w.gone {
 			t.Errorf("image %s gone=%v, want gone=%v", w.id, got, w.gone)

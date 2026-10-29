@@ -14,8 +14,8 @@ import (
 // deletes or keeps, not by whichever tag the daemon lists first: an image
 // shared with another project shows the stack's own tag, a kept service's
 // tag shows as kept. After a compose down the services the lease recorded
-// still find the built image, and another project's labelled image never
-// shows, whatever its tags.
+// still find the built image, and another project's labelled image shows
+// only the stack's own tag it carries.
 func TestDetailsNameSharedImagesByTheStacksTags(t *testing.T) {
 	t.Run("when the image is shared with another project and a kept service, expect each tag on its side", func(t *testing.T) {
 		h := newVH(t)
@@ -59,7 +59,7 @@ func TestDetailsNameSharedImagesByTheStacksTags(t *testing.T) {
 		}
 	})
 
-	t.Run("when another project's labelled image carries the stack's tag shape, expect it on neither side", func(t *testing.T) {
+	t.Run("when another project's labelled image carries the stack's tag shape, expect that tag removed with it", func(t *testing.T) {
 		h := newVH(t)
 		h.srv.AddContainerWithUses("c-web", "myapp-web-1", map[string]string{
 			docker.ProjectLabel: "myapp", docker.ServiceLabel: "web",
@@ -73,8 +73,8 @@ func TestDetailsNameSharedImagesByTheStacksTags(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !slices.Equal(d.RemovedImages, []string{"myapp-web:latest"}) {
-			t.Errorf("RemovedImages = %v, want only [myapp-web:latest]", d.RemovedImages)
+		if !slices.Equal(d.RemovedImages, []string{"myapp-web:latest", "myapp-web:old"}) {
+			t.Errorf("RemovedImages = %v, want the stack's own tag and the one on the other project's image", d.RemovedImages)
 		}
 		if len(d.KeptImages) != 0 {
 			t.Errorf("KeptImages = %v, want none", d.KeptImages)

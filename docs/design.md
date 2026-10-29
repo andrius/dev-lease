@@ -76,7 +76,10 @@ labels, an image goes by id when it has one tag. With several tags
 may have tagged it yourself) Docker refuses a delete by id, so the stack's
 own tags are deleted one by one, each first checked to still name the listed
 image, and the image stays for whatever tags remain. The tags of a kept
-service stay. Pulled images never match and are never touched. Deletes run
+service stay. An image labelled for another project is not the project's
+own, but a tag of the `<project>-<service>` shape for one of the project's
+services comes off it, because identical builds share one image id across
+projects. Pulled images never match and are never touched. Deletes run
 without `force`, so Docker itself protects an image another container uses.
 
 **Policy lives in the app's compose file.** `dev-lease.keep` on a service or

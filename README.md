@@ -123,7 +123,11 @@ you may have tagged it yourself) loses only the stack's own
 `<project>-<service>` tags, each checked to still name that image right
 before its delete; another stack's tag, or a name of your own in another
 repository, keeps the image; a tag of yours in the stack's own repository,
-such as `myapp-web:good`, goes with the others. Pulled images such as
+such as `myapp-web:good`, goes with the others. An image labelled for
+another project is not the stack's own, but a tag of the stack's own
+`<project>-<service>` shape comes off it as well, because identical builds
+share one image across projects: only that tag goes, and the image is
+deleted with its last tag. Pulled images such as
 `postgres:16-alpine` never match and are never removed, and Docker itself
 refuses to delete an image another container uses. Compose can give two
 stacks the same image name: service `feat-web` of `myapp` and service `web`
