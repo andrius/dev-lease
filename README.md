@@ -427,7 +427,7 @@ with a build provenance attestation (verify it with gh 2.49 or later; older
 gh has no `attestation` command):
 
 ```bash
-gh attestation verify oci://ghcr.io/andrius/dev-lease:v0.2.1 --owner andrius
+gh attestation verify oci://ghcr.io/andrius/dev-lease:v0.2.2 --owner andrius
 ```
 
 CI runs on Linux. Docker Desktop on macOS and Windows is not tested yet (the
